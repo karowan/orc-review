@@ -110,7 +110,7 @@ describe("evaluate (rev 2 lane semantics)", () => {
     expect(ev.action).toBe("REQUEST_CHANGES");
   });
 
-  it("caps blocking findings without a can_block source", () => {
+  it("preserves blocking findings without publication authority", () => {
     const ev = run(
       result(
         consolidated({
@@ -118,10 +118,10 @@ describe("evaluate (rev 2 lane semantics)", () => {
         }),
       ),
     );
-    expect(ev.blocking).toBe(false);
-    expect(ev.findings[0].severity).toBe("warning");
-    expect(ev.capped).toEqual(["typo"]);
-    expect(ev.verdict).toBe("APPROVED");
+    expect(ev.blocking).toBe(true);
+    expect(ev.findings[0].severity).toBe("blocking");
+    expect(ev.verdict).toBe("CHANGES REQUESTED");
+    expect(ev.action).toBe("REQUEST_CHANGES");
   });
 
   it("a merged-lane finding blocks if any contributing bot can block", () => {
@@ -178,6 +178,28 @@ describe("evaluate (rev 2 lane semantics)", () => {
 });
 
 describe("render (rev 2)", () => {
+  it("renders an advisory reviewer's blocker as MUST FIX", () => {
+    const c = consolidated({
+      readiness: "not_ready",
+      findings: [
+        { id: "f-1", severity: "blocking", title: "Broken contract", why: "unsafe", reviewers: ["docs"] },
+      ],
+    });
+    const ev = run(result(c));
+    const out = render({
+      headSha: "abc1234def",
+      evaluation: ev,
+      consolidated: c,
+      reviewerNames: ["Docs (local)"],
+      reviewerChange: false,
+      changedPaths: [],
+      runDetails: [],
+    });
+    expect(out.body).toContain("orc-review · CHANGES REQUESTED");
+    expect(out.body).toContain("MUST FIX (1) · SHOULD FIX (0)");
+    expect(out.body).not.toContain("Severity capped");
+  });
+
   it("renders findings, counts, inline anchors, and run details", () => {
     const c = consolidated({
       readiness: "not_ready",

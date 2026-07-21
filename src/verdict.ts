@@ -1,8 +1,8 @@
 /**
  * Fail-closed verdict algebra:
  * partial, failed, or unknown results never approve; a Reviewer Change is
- * never approved by automation; blocking severity only survives if a
- * can_block reviewer sourced it (deterministically capped otherwise).
+ * never approved by automation. Finding severity is evidence and is preserved
+ * independently from any publisher's authority to act on the verdict.
  */
 import { z } from "zod";
 import type {
@@ -65,14 +65,12 @@ export interface Evaluation {
   action: Action;
   complete: boolean;
   blocking: boolean;
-  /** Findings after the deterministic can_block cap, sorted for rendering. */
+  /** Findings sorted for rendering; source severity is never authority-capped. */
   findings: Finding[];
   /** Ids of required bots with zero surviving lanes (rev 2 completeness rule). */
   failedRequired: string[];
   /** Lane keys that errored or went unreported — degraded coverage, not failure. */
   failedLanes: string[];
-  /** Titles of findings whose blocking severity was capped (no can_block source). */
-  capped: string[];
 }
 
 import { SEVERITY_RANK } from "./contracts.js";
@@ -87,11 +85,9 @@ export function evaluate(input: VerdictInput): Evaluation {
       findings: [],
       failedRequired: [],
       failedLanes: [],
-      capped: [],
     };
   }
 
-  const canBlock = new Set(input.eligible.filter((r) => r.canBlock).map((r) => r.id));
   const outcomes = input.result?.laneOutcomes ?? {};
 
   // Rev 2 completeness: a lane failure degrades coverage; a bot fails only
@@ -110,15 +106,9 @@ export function evaluate(input: VerdictInput): Evaluation {
     (input.uncoveredRepos?.length ?? 0) === 0 && // an unjudged repo is missing coverage
     input.result.consolidated.readiness !== "unknown";
 
-  // Deterministic authority cap: blocking survives only via a can_block source.
-  const capped: string[] = [];
-  const findings: Finding[] = (input.result?.consolidated.findings ?? []).map((f) => {
-    if (f.severity === "blocking" && !f.reviewers.some((id) => canBlock.has(id))) {
-      capped.push(f.title);
-      return { ...f, severity: "warning" as const };
-    }
-    return f;
-  });
+  // Severity is review evidence, not publication authority. Publishers decide
+  // separately whether they may enact the resulting action hint.
+  const findings: Finding[] = [...(input.result?.consolidated.findings ?? [])];
   findings.sort((a, b) => {
     const d = SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity];
     return d !== 0 ? d : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
@@ -141,5 +131,5 @@ export function evaluate(input: VerdictInput): Evaluation {
     action = "APPROVE";
   }
 
-  return { verdict, action, complete, blocking, findings, failedRequired, failedLanes, capped };
+  return { verdict, action, complete, blocking, findings, failedRequired, failedLanes };
 }

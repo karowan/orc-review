@@ -2,9 +2,9 @@
  * The local bot registry: personal reviewer profiles under
  * `~/.orc-review/registry/`, called onto a run with `--with <name>`. Same
  * authoring formats as repo reviewers (`<name>.md` or `<name>/reviewer.yaml`
- * + prompts). Registry bots are advisory by construction — never required,
- * never can_block — because they carry no repo-granted authority; the
- * deterministic severity cap enforces that downstream.
+ * + prompts). Registry bots are advisory by construction — never required and
+ * never granted publication authority by the repo. Their finding severities
+ * remain intact so dry-run reviews preserve their full judgment.
  */
 import * as fs from "node:fs";
 import * as os from "node:os";

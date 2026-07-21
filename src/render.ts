@@ -80,10 +80,6 @@ export function render(input: RenderInput): RenderedReview {
       `> Partial lane coverage: ${ev.failedLanes.join(", ")} failed; judged from the remaining lanes.`,
     );
   }
-  for (const title of ev.capped) {
-    lines.push("", `> Severity capped to SHOULD FIX (no blocking-authority reviewer sourced it): ${title}`);
-  }
-
   const counts = { blocking: 0, warning: 0, consider: 0, nit: 0 };
   for (const f of ev.findings) counts[f.severity]++;
   lines.push(

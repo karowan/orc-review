@@ -35,8 +35,9 @@ pinned merge-base SHA so a moving base branch can't skew them.
 **Local bot registry.** Repo config defines a repo's reviewers; your personal
 bots live once in `~/.orc-review/registry/` (same formats: `<name>.md` or
 `<name>/reviewer.yaml`) and join any run via `--with <name>`. Registry bots are
-always advisory — `required`/`can_block` only ever come from the reviewed
-repo's own manifest — and render as "Name (local)".
+never required and receive no repo-granted publication authority, but their
+finding severities remain intact for full-fidelity dry-run reviews. They render
+as "Name (local)".
 
 Every run gets orc's live monitor (URL printed at launch) and a self-contained
 `report.html`.
@@ -76,7 +77,8 @@ verify (deterministic) → one orc run → verdict + render (deterministic)
   chains, repeated patterns, adjacent nits.
 - **Verdict** — fail-closed: a failed lane only degrades coverage, but a
   required bot with zero surviving lanes (or a total wipeout) never approves;
-  blocking findings survive only from `can_block` bots; `APPROVED`,
+  finding severity is preserved independently of publication authority;
+  `APPROVED`,
   `CHANGES REQUESTED`, `PARTIAL — NOT APPROVED`, `ADVISORY — AUTOMATION
   CLEARED`, `ABSTAINED`.
 

@@ -473,7 +473,7 @@ aggregation_notes: prompts/adjudicate.md   # injected into the aggregator, attri
   <tr><th>Deterministic rule</th><th>Effect</th></tr>
   <tr><td>Lane failure semantics</td><td>A failed (or unreported) lane <em>degrades coverage</em> — noted in the review, not fatal. A bot is complete iff <strong>at least one</strong> of its lanes settled ok.</td></tr>
   <tr><td>Completeness</td><td>run <code>completed</code> ∧ result parses ∧ every <em>required</em> bot has ≥1 surviving lane ∧ no uncovered repos ∧ readiness ≠ unknown</td></tr>
-  <tr><td>Authority cap</td><td>A blocking finding survives only if some sourcing bot has <code>can_block</code>; otherwise deterministically capped to SHOULD FIX (noted). Merged findings pass if <em>any</em> contributing bot can block.</td></tr>
+  <tr><td>Evidence vs authority</td><td>Finding severity is preserved exactly as consolidated, including blockers from local advisory bots. The action is a full review conclusion; a publisher independently decides which GitHub side effects it is authorized to perform.</td></tr>
 </table></div>
 <div class="table-wrap"><table>
   <tr><th>Priority</th><th>Condition</th><th>Verdict</th><th>Action hint</th></tr>
@@ -487,8 +487,8 @@ aggregation_notes: prompts/adjudicate.md   # injected into the aggregator, attri
 <p>
   The rendered <strong>Consolidated Review</strong>: header
   (<code>orc-review · VERDICT · &lt;changeId7&gt;[+dirty]</code>), Reviewed-by, coverage, summary,
-  warnings (reviewer change, uncovered repos, incomplete, degraded lane coverage, capped
-  severities), findings sorted by severity rank with
+  warnings (reviewer change, uncovered repos, incomplete, degraded lane coverage),
+  findings sorted by severity rank with
   <code>MUST FIX / SHOULD FIX / CONSIDER / NIT</code> counts, per-finding why/fix/attribution,
   omissions, and a collapsible run-details block. Inline-comment anchors are computed for findings
   on changed files (for a future publisher) but every finding also stays in the body. A clean
@@ -528,7 +528,7 @@ outcome.monitorUrl;              // live monitor</code></pre>
 <div class="invariant"><p><strong>Selection is deterministic.</strong> The planner chooses how reviewers run, never whether. Byte-identical cohorts for identical inputs.</p></div>
 <div class="invariant"><p><strong>Judgment is verbatim.</strong> Prompt text is injected, never model-rewritten; merging is concatenation with union attribution; there is no support tier — every call is a judgment lane or the aggregator.</p></div>
 <div class="invariant"><p><strong>Depth is exactly 1.</strong> Lanes produce findings; one aggregator merges them; nothing else merges judgment. Reviewers never see each other's output.</p></div>
-<div class="invariant"><p><strong>Authority is repo-granted.</strong> <code>required</code>/<code>can_block</code> bind only in a reviewed repo's base-tree manifest — never from the registry, a flag, or a lane.</p></div>
+<div class="invariant"><p><strong>Evidence is not authority.</strong> Reviewers retain their finding severities and full verdict conclusions. Publication authority is enforced separately by the service layer; registry bots remain non-required and cannot grant that authority to themselves.</p></div>
 <div class="invariant"><p><strong>Fail closed, degrade honestly.</strong> Malformed results, failed required bots, uncovered repos, unknown readiness → never approve. Partial lane failures degrade coverage and say so.</p></div>
 <div class="invariant"><p><strong>Everything reviews read-only from pinned state.</strong> SHAs not branch names; dirty state fingerprinted into the attempt identity; no leaf may write.</p></div>
 

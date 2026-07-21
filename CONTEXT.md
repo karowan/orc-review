@@ -63,9 +63,9 @@ fail-closed verdicts) predate this repo; the execution paradigm is orc's.
    (noted in the review); a required bot with **zero** surviving lanes — or a
    total wipeout — → `PARTIAL — NOT APPROVED`; surviving blocking finding →
    `CHANGES REQUESTED`; Reviewer Change → `ADVISORY — AUTOMATION CLEARED`;
-   ready and clean → `APPROVED`; empty cohort → `ABSTAINED`. Blocking severity
-   only survives if a `can_block` bot sourced it (deterministically capped
-   otherwise; merged findings pass if any contributing bot can block).
+   ready and clean → `APPROVED`; empty cohort → `ABSTAINED`. Finding severity
+   is evidence and survives independently of whether a publisher is authorized
+   to enact the resulting action hint.
 
 ## Invariants (ported ADRs)
 

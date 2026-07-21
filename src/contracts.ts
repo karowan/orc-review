@@ -226,5 +226,5 @@ export type Verdict =
   | "ABSTAINED"
   | "REVIEWED";
 
-/** Advisory action hint for a future service layer; layer 1 never publishes. */
+/** Full review conclusion for a service layer; layer 1 never publishes. */
 export type Action = "APPROVE" | "REQUEST_CHANGES" | "COMMENT" | "NONE";
