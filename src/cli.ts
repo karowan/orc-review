@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * orc-review CLI — validate | plan | run | bots. Creation, running, and
  * monitoring of the review workflow; nothing past it.

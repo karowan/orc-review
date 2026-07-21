@@ -2,7 +2,7 @@
  * JSON Schemas for structured lane output. Injected into the generated program
  * as the SCHEMAS constant; also used to parse results defensively host-side.
  */
-import type { Json } from "@orc/sdk/program";
+import type { Json } from "@karowanorg/orc-sdk/program";
 
 const FINDING_PROPS: Record<string, Json> = {
   severity: { enum: ["blocking", "warning", "consider", "nit"] },

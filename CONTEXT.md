@@ -14,7 +14,7 @@ fail-closed verdicts) predate this repo; the execution paradigm is orc's.
 
 | Layer | Owns |
 |---|---|
-| **orc-review (this repo)** | Config compile, deterministic selection, eligibility, program planning (model-authored `orc.ts`), deterministic verification, launch/monitor via `@orc/sdk`, verdict + Consolidated Review rendering |
+| **orc-review (this repo)** | Config compile, deterministic selection, eligibility, program planning (model-authored `orc.ts`), deterministic verification, launch/monitor via `@karowanorg/orc-sdk`, verdict + Consolidated Review rendering |
 | **service layer (future)** | Webhooks, PR lineage/supersession, pinned checkouts, GitHub publication, Slack, human review SLAs, affinity |
 
 ## Core pipeline: law → craft → law
