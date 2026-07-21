@@ -32,9 +32,9 @@ describe("verifyProgram (flat rules)", () => {
     const body = `// PLAN: no merges
 export default async ({ agent, parallel, phase, log }) => {
   const lanes = await phase("review", () => parallel([
-    { prompt: \`\${PROMPTS["security/prompt"]}\\n\\nChanged paths: \${JSON.stringify(CTX.changedPaths)}\`, id: "security/prompt", schema: SCHEMAS.findings },
-    { prompt: PROMPTS["abhinav/lanes/0"], id: "abhinav/lanes/0", schema: SCHEMAS.findings },
-    { prompt: PROMPTS["abhinav/lanes/1"], id: "abhinav/lanes/1", schema: SCHEMAS.findings },
+    { prompt: \`\${PROMPTS["security/prompt"]}\\n\\nChanged paths: \${JSON.stringify(CTX.changedPaths)}\`, id: "security/prompt", readOnly: false, schema: SCHEMAS.findings },
+    { prompt: PROMPTS["abhinav/lanes/0"], id: "abhinav/lanes/0", readOnly: false, schema: SCHEMAS.findings },
+    { prompt: PROMPTS["abhinav/lanes/1"], id: "abhinav/lanes/1", readOnly: false, schema: SCHEMAS.findings },
   ]));
   ${AGG_CALL}
   return { consolidated, laneOutcomes: { "security/prompt": lanes[0].status, "abhinav/lanes/0": lanes[1].status, "abhinav/lanes/1": lanes[2].status } };
@@ -60,13 +60,18 @@ export default async ({ agent, parallel, phase, log }) => {
     const body = `// PLAN: security/prompt and abhinav/lanes/1 both audit quality gates — merged
 export default async ({ agent, parallel, phase }) => {
   const lanes = await phase("review", () => parallel([
-    { prompt: \`\${PROMPTS["security/prompt"]}\\n\\n\${PROMPTS["abhinav/lanes/1"]}\`, id: "security/prompt+abhinav/lanes/1", model: "claude-opus-4-8", schema: SCHEMAS.findings },
-    { prompt: PROMPTS["abhinav/lanes/0"], id: "abhinav/lanes/0", schema: SCHEMAS.findings },
+    { prompt: \`\${PROMPTS["security/prompt"]}\\n\\n\${PROMPTS["abhinav/lanes/1"]}\`, id: "security/prompt+abhinav/lanes/1", model: "claude-opus-4-8", readOnly: false, schema: SCHEMAS.findings },
+    { prompt: PROMPTS["abhinav/lanes/0"], id: "abhinav/lanes/0", readOnly: false, schema: SCHEMAS.findings },
   ]));
   ${AGG_CALL}
   return { consolidated, laneOutcomes: { "security/prompt": lanes[0].status, "abhinav/lanes/1": lanes[0].status, "abhinav/lanes/0": lanes[1].status } };
 };`;
     expect(verifyProgram(wrap(body), reviewers)).toEqual([]);
+  });
+
+  it("rejects reviewer leaves that cannot create test artifacts", () => {
+    const body = templateProgram(reviewers).replaceAll("readOnly: false, ", "");
+    expect(verifyProgram(wrap(body), reviewers).join()).toContain("must set readOnly: false");
   });
 
   it("enforces the planner judgment-call ceiling without dropping lane keys", () => {
@@ -168,7 +173,7 @@ export default async ({ agent, parallel, phase }) => {
     );
   });
 
-  it("rejects readOnly/cwd/host options, ext usage, and dynamic keys", () => {
+  it("allows writable lanes but rejects cwd/host options, ext usage, and dynamic keys", () => {
     const body = `export default async ({ agent, parallel, phase, ext }) => {
   await ext.push({});
   const k = "security/prompt";
@@ -181,7 +186,7 @@ export default async ({ agent, parallel, phase }) => {
   return { consolidated, laneOutcomes: {} };
 };`;
     const problems = verifyProgram(wrap(body), reviewers).join();
-    expect(problems).toContain('option "readOnly" is not allowed');
+    expect(problems).not.toContain('option "readOnly" is not allowed');
     expect(problems).toContain('option "cwd" is not allowed');
     expect(problems).toContain('option "host" is not allowed');
     expect(problems).toContain("touches ext");

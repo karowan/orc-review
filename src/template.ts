@@ -10,6 +10,7 @@ function laneSpec(lane: FlatLane): string {
   const opts: string[] = [
     `prompt: PROMPTS[${JSON.stringify(lane.promptKey)}]`,
     `id: ${JSON.stringify(lane.promptKey)}`,
+    "readOnly: false",
   ];
   if (lane.harness) opts.push(`harness: ${JSON.stringify(lane.harness)}`);
   if (lane.model) opts.push(`model: ${JSON.stringify(lane.model)}`);

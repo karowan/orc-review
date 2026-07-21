@@ -260,7 +260,7 @@ orc-review run --repo github:acme/lib#412               # custom source, scheme-
 
 <h3>The composed workspace</h3>
 <p>
-  Lanes run read-only in <code>~/.orc-review/workspaces/&lt;changeId&gt;/</code> — a directory of
+  Lanes run sandboxed in <code>~/.orc-review/workspaces/&lt;changeId&gt;/</code> — a directory of
   symlinks, one per pin, named by id. Uniform for N = 1. Agents address everything as
   <code>&lt;repoId&gt;/&lt;path&gt;</code>; findings must anchor paths the same way (enforced by
   the schema description and the brief), which is what makes inline-comment anchoring work against
@@ -412,16 +412,16 @@ aggregation_notes: prompts/adjudicate.md   # injected into the aggregator, attri
   <tr><td>Lane coverage</td><td>Every lane key of every eligible bot appears <strong>exactly once</strong> across tier 1; one call may carry several keys (a merged lane)</td></tr>
   <tr><td>Verbatim judgment</td><td>Every prompt referencing <code>PROMPTS</code> must <em>start</em> with a <code>PROMPTS[…]</code> reference; string-literal keys only</td></tr>
   <tr><td>Verbatim bots</td><td>Their keys sit in single-key calls — never merged</td></tr>
-  <tr><td>Schemas</td><td>Judgment calls carry <code>SCHEMAS.findings</code></td></tr>
+  <tr><td>Schemas</td><td>Judgment calls carry <code>SCHEMAS.findings</code> and explicitly set <code>readOnly: false</code> so tests can create artifacts</td></tr>
   <tr><td>No support tier</td><td>Every agent call is a judgment lane or the aggregator; any free-prompt call is rejected</td></tr>
   <tr><td>Aggregation</td><td>Exactly one call with <code>SCHEMAS.consolidated</code>, prompt headed by <code>MERGE_PROMPT</code>, zero <code>PROMPTS</code> references</td></tr>
-  <tr><td>Escapes</td><td>No <code>readOnly</code>/<code>cwd</code>/<code>host</code> options, no <code>ext</code>, no redeclaring injected constants, phase names are string literals</td></tr>
+  <tr><td>Escapes</td><td>No <code>cwd</code>/<code>host</code> options, no <code>ext</code>, no redeclaring injected constants, phase names are string literals</td></tr>
 </table></div>
 <p>
   Then orc's own <code>validate</code> compiles the program in the deterministic sandbox, previews
   the first frontier, and live-probes every referenced harness/model/effort. Lane isolation ("no
   lane's output in another lane's prompt") is stated to the planner but needs data-flow analysis to
-  prove; the structural rules plus read-only leaves bound the blast radius of a violation.
+  prove; the structural rules still prevent direct cross-lane prompt references.
 </p>
 
 <h2 id="execution">8 · Execution on orc</h2>
@@ -431,8 +431,10 @@ aggregation_notes: prompts/adjudicate.md   # injected into the aggregator, attri
   the journal is the evidence trail, and orc's live monitor is the review UI — phase cards
   (<code>review</code> / <code>aggregate</code>), per-lane rows with
   harness · model · cost · duration, a self-contained <code>report.html</code>. Launch parameters:
-  cwd = the composed workspace, <code>approvalMode: auto</code>, <code>allowWrites: false</code>
-  (every leaf read-only, fail-closed), budget/maxParallel from the primary manifest or flags. The
+  cwd = the composed workspace, <code>approvalMode: auto</code>, <code>allowWrites: true</code>,
+  sandboxed to the pinned roots. Reviewer leaves may create test/build artifacts but are briefed
+  not to alter tracked source or cause external side effects; the aggregator stays read-only.
+  Budget/maxParallel come from the primary manifest or flags. The
   brief injected into every leaf enumerates each repo's pinned diff instructions and the
   path-addressing convention. Lane failures settle as envelopes; one failing lane never sinks the
   run. Fail-forward resume and replay come from orc.
@@ -530,7 +532,7 @@ outcome.monitorUrl;              // live monitor</code></pre>
 <div class="invariant"><p><strong>Depth is exactly 1.</strong> Lanes produce findings; one aggregator merges them; nothing else merges judgment. Reviewers never see each other's output.</p></div>
 <div class="invariant"><p><strong>Evidence is not authority.</strong> Reviewers retain their finding severities and full verdict conclusions. Publication authority is enforced separately by the service layer; registry bots remain non-required and cannot grant that authority to themselves.</p></div>
 <div class="invariant"><p><strong>Fail closed, degrade honestly.</strong> Malformed results, failed required bots, uncovered repos, unknown readiness → never approve. Partial lane failures degrade coverage and say so.</p></div>
-<div class="invariant"><p><strong>Everything reviews read-only from pinned state.</strong> SHAs not branch names; dirty state fingerprinted into the attempt identity; no leaf may write.</p></div>
+<div class="invariant"><p><strong>Everything reviews sandboxed pinned state.</strong> SHAs not branch names; dirty state fingerprinted into the attempt identity; reviewer writes are limited to local test/build artifacts and never grant publication authority.</p></div>
 
 <h2 id="decisions">13 · Decision log</h2>
 

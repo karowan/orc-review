@@ -9,22 +9,24 @@
  *   - every call IS a judgment lane or the aggregator — no support tier
  *   - exactly one aggregator: MERGE_PROMPT-headed, SCHEMAS.consolidated,
  *     zero PROMPTS references
- *   - no readOnly/cwd/host/ext escapes, no redeclared injected constants
+ *   - every judgment leaf is writable inside the disposable sandbox
+ *   - no cwd/host/ext escapes, no redeclared injected constants
  *
  * (Lane isolation — "no lane's output in another lane's prompt" — is stated to
  * the planner but needs data-flow analysis to prove; the structural rules here
- * plus read-only leaves bound the blast radius of a violation.)
+ * still prevent cross-lane prompt references.)
  */
 import ts from "typescript";
 import { flatLanes, type CompiledReviewer } from "./contracts.js";
 
 const RESERVED = new Set(["PROMPTS", "NOTES", "SCHEMAS", "CTX", "MERGE_PROMPT", "AGG"]);
-const FORBIDDEN_OPTS = new Set(["readOnly", "cwd", "host"]);
+const FORBIDDEN_OPTS = new Set(["cwd", "host"]);
 
 interface JudgmentCall {
   keys: string[];
   headed: boolean; // prompt begins with a PROMPTS ref
   schema: string | null;
+  writable: boolean;
   where: string;
 }
 
@@ -91,12 +93,21 @@ export function verifyProgram(
     return null;
   };
 
+  const isWritable = (obj: ts.ObjectLiteralExpression | undefined): boolean =>
+    !!obj?.properties.some(
+      (prop) =>
+        ts.isPropertyAssignment(prop) &&
+        ts.isIdentifier(prop.name) &&
+        prop.name.text === "readOnly" &&
+        prop.initializer.kind === ts.SyntaxKind.FalseKeyword,
+    );
+
   const noteCall = (promptExpr: ts.Expression, opts: ts.ObjectLiteralExpression | undefined, where: string) => {
     const refs: string[] = [];
     collectRefs(promptExpr, refs);
     const schema = schemaRef(opts);
     if (refs.length > 0) {
-      judgmentCalls.push({ keys: refs, headed: promptsHeaded(promptExpr), schema, where });
+      judgmentCalls.push({ keys: refs, headed: promptsHeaded(promptExpr), schema, writable: isWritable(opts), where });
       if (mergeHeaded(promptExpr)) {
         problems.push(`${where}: a judgment prompt must not also start from MERGE_PROMPT`);
       }
@@ -188,6 +199,9 @@ export function verifyProgram(
     }
     if (call.schema !== "SCHEMAS.findings") {
       problems.push(`${call.where} carrying judgment (keys ${call.keys.join(", ")}) must have schema: SCHEMAS.findings`);
+    }
+    if (!call.writable) {
+      problems.push(`${call.where} carrying judgment (keys ${call.keys.join(", ")}) must set readOnly: false`);
     }
     for (const key of call.keys) {
       if (key === "<dynamic>") {

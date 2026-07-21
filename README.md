@@ -68,11 +68,13 @@ verify (deterministic) → one orc run → verdict + render (deterministic)
 - **Verify** — an AST verifier enforces the contract: every lane key exactly
   once (merged calls may carry several), judgment prompts verbatim-headed from
   injected constants, verbatim bots never merged, exactly one aggregator call,
-  no write/cwd/host/ext escapes, schemas attached. Then orc's `validate`
+  writable reviewer leaves, no cwd/host/ext escapes, schemas attached. Then orc's `validate`
   live-probes models/harnesses. Rejected plans retry with feedback, then fall
   back to the template.
-- **Run** — one orc run, all leaves read-only in your worktree; the pinned
-  program bundle is the review spec, the journal is the evidence trail. The
+- **Run** — one orc run in a sandbox: reviewer leaves may write test/build
+  artifacts but are instructed not to alter tracked source or perform external
+  side effects; the aggregator remains read-only. The pinned program bundle is
+  the review spec, the journal is the evidence trail. The
   single **aggregator** (default `gpt-5.6-sol` on codex; `run.aggregator_model`
   / `run.aggregator_harness` / `run.aggregator_effort` to override) consumes
   every lane envelope and dedupes aggressively — cross-bot merges, symptom
