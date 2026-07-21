@@ -8,7 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
-import { Orc } from "@orc/sdk";
+import { Orc } from "@karowanorg/orc-sdk";
 import { assemble, type AssemblyInput } from "./assemble.js";
 import { ConfigError, loadConfig } from "./config.js";
 import {

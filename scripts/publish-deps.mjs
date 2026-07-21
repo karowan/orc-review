@@ -15,7 +15,7 @@ if (mode === "swap") {
   fs.copyFileSync(PKG, BAK);
   const pkg = JSON.parse(fs.readFileSync(PKG, "utf8"));
   for (const [name, spec] of Object.entries(pkg.dependencies)) {
-    if (name.startsWith("@orc/") && String(spec).startsWith("file:")) {
+    if (name.startsWith("@karowanorg/orc-") && String(spec).startsWith("file:")) {
       pkg.dependencies[name] = RANGE;
     }
   }
