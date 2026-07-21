@@ -175,6 +175,21 @@ describe("evaluate (rev 2 lane semantics)", () => {
       parseProgramResult({ consolidated: consolidated(), reviewerOutcomes: { security: "ok" } }),
     ).toBeNull(); // rev 1 shape no longer parses
   });
+
+  it("recovers a valid consolidated value from a mistakenly settled aggregator", () => {
+    expect(
+      parseProgramResult({
+        consolidated: { status: "ok", value: consolidated({ readiness: "not_ready" }) },
+        laneOutcomes: ALL_OK,
+      }),
+    ).toEqual(result(consolidated({ readiness: "not_ready" })));
+    expect(
+      parseProgramResult({
+        consolidated: { status: "error", error: "aggregator failed" },
+        laneOutcomes: ALL_OK,
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("render (rev 2)", () => {

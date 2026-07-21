@@ -29,18 +29,30 @@ interface CommonLocal {
   registry?: string;
   allowUncovered?: boolean;
   json?: boolean;
+  planFile?: string;
 }
 
 const reviewOptions = (cmd: Command, local: CommonLocal): ReviewOptions => {
   const g = cmd.optsWithGlobals();
   const context = g.contextFile ? readFileSync(g.contextFile, "utf8") : undefined;
   if (context && Buffer.byteLength(context) > 64 * 1024) fail("--context-file exceeds 65536 bytes");
+  let preparedPlan: unknown;
+  if (local.planFile) {
+    const raw = readFileSync(local.planFile, "utf8");
+    if (Buffer.byteLength(raw) > 8 * 1024 * 1024) fail("--plan-file exceeds 8388608 bytes");
+    try {
+      preparedPlan = JSON.parse(raw);
+    } catch (err) {
+      fail(`--plan-file is not valid JSON: ${String(err)}`);
+    }
+  }
   return {
     repos: g.repo,
     dir: g.dir,
     baseRef: g.base,
     allowUncovered: local.allowUncovered,
     planner: local.planner === false ? null : undefined,
+    preparedPlan,
     withBots: local.with,
     registryDir: local.registry,
     context,
@@ -142,6 +154,7 @@ program
   .command("run")
   .description("run the review workflow and print the Consolidated Review")
   .option("--no-planner", "use the deterministic template instead of the plan model")
+  .option("--plan-file <path>", "execute the exact verified `plan --program --json` artifact")
   .option("--budget <usd>", "reactive USD cap for the run")
   .option("--with <bot...>", "call local-registry bots onto the run (always advisory)")
   .option("--registry <dir>", "registry directory override")

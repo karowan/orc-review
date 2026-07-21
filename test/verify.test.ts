@@ -173,6 +173,21 @@ export default async ({ agent, parallel, phase }) => {
     );
   });
 
+  it("rejects a settled aggregator envelope instead of discarding its valid value later", () => {
+    const body = `export default async ({ agent, parallel, phase, settle }) => {
+  const lanes = await phase("review", () => parallel([
+    { prompt: PROMPTS["security/prompt"], readOnly: false, schema: SCHEMAS.findings },
+    { prompt: PROMPTS["abhinav/lanes/0"], readOnly: false, schema: SCHEMAS.findings },
+    { prompt: PROMPTS["abhinav/lanes/1"], readOnly: false, schema: SCHEMAS.findings },
+  ]));
+  const consolidated = await phase("aggregate", () =>
+    settle(agent(\`\${MERGE_PROMPT}\n\nRoster: \${JSON.stringify(CTX.reviewers)}\nNotes: \${JSON.stringify(NOTES)}\nLanes: \${JSON.stringify(lanes)}\`,
+      { id: "aggregate", harness: AGG.harness, model: AGG.model, schema: SCHEMAS.consolidated })));
+  return { consolidated, laneOutcomes: { "security/prompt": lanes[0].status, "abhinav/lanes/0": lanes[1].status, "abhinav/lanes/1": lanes[2].status } };
+};`;
+    expect(verifyProgram(wrap(body), reviewers).join()).toContain("cannot be wrapped in settle()");
+  });
+
   it("allows writable lanes but rejects cwd/host options, ext usage, and dynamic keys", () => {
     const body = `export default async ({ agent, parallel, phase, ext }) => {
   await ext.push({});

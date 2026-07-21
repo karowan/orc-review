@@ -34,7 +34,15 @@ const ConsolidatedSchema = z.object({
 });
 
 const ProgramResultSchema = z.object({
-  consolidated: ConsolidatedSchema,
+  // Defensive compatibility for a planner that incorrectly settled the
+  // aggregator. Verification rejects new instances, but a completed review's
+  // valid evidence must not be discarded at the collection boundary.
+  consolidated: z
+    .union([
+      ConsolidatedSchema,
+      z.object({ status: z.literal("ok"), value: ConsolidatedSchema }),
+    ])
+    .transform((value) => ("status" in value ? value.value : value)),
   laneOutcomes: z.record(z.string(), z.enum(["ok", "error"])),
 });
 

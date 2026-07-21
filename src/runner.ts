@@ -55,6 +55,8 @@ export interface ReviewOptions {
   allowUncovered?: boolean;
   /** Explicit plan model; null forces the deterministic template. */
   planner?: PlanModel | null;
+  /** Prior `plan --program --json` output whose exact verified program must run. */
+  preparedPlan?: unknown;
   budgetUsd?: number;
   affinity?: string[];
   /** Local-registry bots to call onto this run (always advisory). */
@@ -100,9 +102,13 @@ export interface PreparedReview {
   /** Qualified eligible bots (declaration order per pin, pin order) + local bots. */
   eligible: CompiledReviewer[];
   localBots: string[];
+  /** Planner-authored body, retained so a saved plan can rebuild and verify its injected header. */
+  programBody?: string;
   programSource?: string;
   programPath?: string;
   programSha256?: string;
+  /** Binds a saved plan to this exact change, cohort, models, and run policy. */
+  planContractSha256?: string;
   plannerUsed: "model" | "template" | "none";
   rejectedPlans: string[][];
 }
@@ -143,6 +149,102 @@ function plansDir(): string {
   const dir = path.join(os.homedir(), ".orc-review", "plans");
   fs.mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+function planContractSha256(
+  base: PreparedReview,
+  manifest: Manifest | undefined,
+  aggregator: AggregatorOptions,
+  maxJudgmentCalls: number | undefined,
+): string {
+  const contract = {
+    version: 1,
+    changeId: base.changeId,
+    facts: base.facts,
+    manifest,
+    aggregator,
+    maxJudgmentCalls,
+    reviewers: base.eligible.map((reviewer) => ({
+      id: reviewer.id,
+      required: reviewer.required,
+      canBlock: reviewer.canBlock,
+      verbatim: reviewer.verbatim,
+      contentHash: reviewer.contentHash,
+      aggregationNotes: reviewer.aggregationNotes,
+      plannerHints: reviewer.plannerHints,
+      lanes: reviewer.lanes.map((lane) => ({
+        promptKey: lane.promptKey,
+        promptPath: lane.promptPath,
+        harness: lane.harness,
+        model: lane.model,
+        reasoningEffort: lane.reasoningEffort,
+      })),
+    })),
+  };
+  return createHash("sha256").update(JSON.stringify(contract)).digest("hex");
+}
+
+function writeProgram(facts: Facts, changeId: string, source: string): { path: string; sha256: string } {
+  const sha256 = createHash("sha256").update(source).digest("hex");
+  const file = path.join(
+    plansDir(),
+    `${facts.repository.replace(/[^a-zA-Z0-9_+-]/g, "_").slice(0, 40)}-${changeId.slice(0, 24)}-${sha256.slice(0, 8)}.orc.ts`,
+  );
+  fs.writeFileSync(file, source);
+  return { path: file, sha256 };
+}
+
+function reusePreparedPlan(
+  base: PreparedReview,
+  assembly: AssemblyInput,
+  value: unknown,
+  contractSha256: string,
+  maxJudgmentCalls: number | undefined,
+): PreparedReview {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ConfigError(["--plan-file must contain `orc-review plan --program --json` output"]);
+  }
+  const saved = value as Record<string, unknown>;
+  if (saved.planContractSha256 !== contractSha256) {
+    throw new ConfigError([
+      "--plan-file does not match the current change, reviewer definitions, models, or run policy; generate a fresh plan",
+    ]);
+  }
+  if (
+    typeof saved.programBody !== "string" ||
+    typeof saved.programSource !== "string" ||
+    typeof saved.programSha256 !== "string"
+  ) {
+    throw new ConfigError(["--plan-file is missing its verified program body, source, or digest"]);
+  }
+  const actualSha256 = createHash("sha256").update(saved.programSource).digest("hex");
+  if (actualSha256 !== saved.programSha256) {
+    throw new ConfigError([`--plan-file program digest mismatch: expected ${saved.programSha256}, got ${actualSha256}`]);
+  }
+  if (assemble(assembly, saved.programBody) !== saved.programSource) {
+    throw new ConfigError([
+      "--plan-file program does not match its body and the current injected prompts, facts, or aggregator policy",
+    ]);
+  }
+  const problems = verifyProgram(saved.programSource, base.eligible, { maxJudgmentCalls });
+  if (problems.length > 0) {
+    throw new ConfigError(["--plan-file program no longer verifies", ...problems]);
+  }
+  const plannerUsed = saved.plannerUsed;
+  if (plannerUsed !== "model" && plannerUsed !== "template") {
+    throw new ConfigError([`--plan-file has invalid plannerUsed ${JSON.stringify(plannerUsed)}`]);
+  }
+  const program = writeProgram(base.facts, base.changeId, saved.programSource);
+  return {
+    ...base,
+    programBody: saved.programBody,
+    programSource: saved.programSource,
+    programPath: program.path,
+    programSha256: program.sha256,
+    planContractSha256: contractSha256,
+    plannerUsed,
+    rejectedPlans: [],
+  };
 }
 
 function setChangeId(pins: RepoPin[]): { changeId: string; dirty: boolean } {
@@ -251,8 +353,14 @@ export async function prepare(opts: ReviewOptions): Promise<PreparedReview> {
     matchedRules,
     aggregator: aggregatorOptions(primaryManifest),
   };
+  const maxJudgmentCalls = primaryManifest?.planner?.maxCalls;
+  const contractSha256 = planContractSha256(base, primaryManifest, assembly.aggregator, maxJudgmentCalls);
+  if (opts.preparedPlan !== undefined) {
+    return reusePreparedPlan(base, assembly, opts.preparedPlan, contractSha256, maxJudgmentCalls);
+  }
 
   const rejectedPlans: string[][] = [];
+  let programBody: string | undefined;
   let source: string | undefined;
   let plannerUsed: "model" | "template" = "template";
 
@@ -282,15 +390,16 @@ export async function prepare(opts: ReviewOptions): Promise<PreparedReview> {
             matchedRules,
             feedback,
             priorBody,
-            maxCalls: plannerConfig?.maxCalls,
+            maxCalls: maxJudgmentCalls,
           }),
         );
         const body = extractProgramBody(raw);
         const candidate = assemble(assembly, body);
         const problems = verifyProgram(candidate, eligible, {
-          maxJudgmentCalls: plannerConfig?.maxCalls,
+          maxJudgmentCalls,
         });
         if (problems.length === 0) {
+          programBody = body;
           source = candidate;
           plannerUsed = "model";
           break;
@@ -312,7 +421,8 @@ export async function prepare(opts: ReviewOptions): Promise<PreparedReview> {
       );
     }
     progress(planModel ? "planner rejected; falling back to the template plan" : "using the template plan");
-    source = assemble(assembly, templateProgram(eligible));
+    programBody = templateProgram(eligible);
+    source = assemble(assembly, programBody);
     const problems = verifyProgram(source, eligible);
     if (problems.length > 0) {
       throw new Error(`template plan failed verification (bug):\n  ${problems.join("\n  ")}`);
@@ -320,14 +430,17 @@ export async function prepare(opts: ReviewOptions): Promise<PreparedReview> {
     plannerUsed = "template";
   }
 
-  const sha = createHash("sha256").update(source).digest("hex");
-  const programPath = path.join(
-    plansDir(),
-    `${facts.repository.replace(/[^a-zA-Z0-9_+-]/g, "_").slice(0, 40)}-${changeId.slice(0, 24)}-${sha.slice(0, 8)}.orc.ts`,
-  );
-  fs.writeFileSync(programPath, source);
-
-  return { ...base, programSource: source, programPath, programSha256: sha, plannerUsed, rejectedPlans };
+  const program = writeProgram(facts, changeId, source);
+  return {
+    ...base,
+    programBody,
+    programSource: source,
+    programPath: program.path,
+    programSha256: program.sha256,
+    planContractSha256: contractSha256,
+    plannerUsed,
+    rejectedPlans,
+  };
 }
 
 export function reviewBrief(p: PreparedReview, context?: string): string {

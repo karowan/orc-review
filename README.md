@@ -17,6 +17,16 @@ orc-review run --repo app=~/code/app@origin/main \
                --repo lib=~/code/lib@origin/main   # review a repo SET together
 ```
 
+To preflight once and execute those exact verified program bytes later:
+
+```bash
+orc-review plan --program --json > review-plan.json
+orc-review run --plan-file review-plan.json --json
+```
+
+`run --plan-file` re-resolves the change and reviewer definitions, rejects a
+stale or modified artifact, and never calls the planner again.
+
 A review always runs over a **set of repo pins (N ≥ 1)** — one repo is a set of
 size one; there is no single-vs-multi mode. Each repo brings its own
 `.orc-review` config; bots and paths are namespaced by repo id

@@ -44,7 +44,7 @@ export function verifyProgram(
 
   let hasDefaultExport = false;
   const judgmentCalls: JudgmentCall[] = [];
-  const consolidatedCalls: Array<{ mergeHeaded: boolean; promptsRefs: number }> = [];
+  const consolidatedCalls: Array<{ mergeHeaded: boolean; promptsRefs: number; settled: boolean }> = [];
   const seenDecl = new Map<string, number>();
 
   const stripParens = (e: ts.Expression): ts.Expression =>
@@ -102,7 +102,28 @@ export function verifyProgram(
         prop.initializer.kind === ts.SyntaxKind.FalseKeyword,
     );
 
-  const noteCall = (promptExpr: ts.Expression, opts: ts.ObjectLiteralExpression | undefined, where: string) => {
+  const callName = (node: ts.CallExpression): string => {
+    const callee = stripParens(node.expression);
+    return ts.isIdentifier(callee)
+      ? callee.text
+      : ts.isPropertyAccessExpression(callee)
+        ? callee.name.text
+        : "";
+  };
+
+  const nestedInSettle = (node: ts.Node): boolean => {
+    for (let parent = node.parent; parent; parent = parent.parent) {
+      if (ts.isCallExpression(parent) && callName(parent) === "settle") return true;
+    }
+    return false;
+  };
+
+  const noteCall = (
+    promptExpr: ts.Expression,
+    opts: ts.ObjectLiteralExpression | undefined,
+    where: string,
+    settled = false,
+  ) => {
     const refs: string[] = [];
     collectRefs(promptExpr, refs);
     const schema = schemaRef(opts);
@@ -112,7 +133,7 @@ export function verifyProgram(
         problems.push(`${where}: a judgment prompt must not also start from MERGE_PROMPT`);
       }
     } else if (schema === "SCHEMAS.consolidated" || mergeHeaded(promptExpr)) {
-      consolidatedCalls.push({ mergeHeaded: mergeHeaded(promptExpr), promptsRefs: refs.length });
+      consolidatedCalls.push({ mergeHeaded: mergeHeaded(promptExpr), promptsRefs: refs.length, settled });
       if (schema !== "SCHEMAS.consolidated") {
         problems.push(`${where}: the aggregator call must carry schema: SCHEMAS.consolidated`);
       }
@@ -146,12 +167,7 @@ export function verifyProgram(
     }
 
     if (ts.isCallExpression(node)) {
-      const callee = stripParens(node.expression);
-      const calleeName = ts.isIdentifier(callee)
-        ? callee.text
-        : ts.isPropertyAccessExpression(callee)
-          ? callee.name.text
-          : "";
+      const calleeName = callName(node);
 
       if (calleeName === "phase" && node.arguments.length >= 1) {
         const nameArg = stripParens(node.arguments[0]);
@@ -164,6 +180,7 @@ export function verifyProgram(
           node.arguments[0],
           opts && ts.isObjectLiteralExpression(opts) ? opts : undefined,
           "an agent() call",
+          nestedInSettle(node),
         );
       }
 
@@ -238,6 +255,8 @@ export function verifyProgram(
     problems.push(`expected exactly one aggregator call with SCHEMAS.consolidated, found ${consolidatedCalls.length}`);
   } else if (!consolidatedCalls[0].mergeHeaded) {
     problems.push("the aggregator prompt must start with MERGE_PROMPT");
+  } else if (consolidatedCalls[0].settled) {
+    problems.push("the aggregator must return its consolidated value directly and cannot be wrapped in settle()");
   }
 
   return problems;
