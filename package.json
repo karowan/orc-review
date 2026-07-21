@@ -1,0 +1,34 @@
+{
+  "name": "orc-review",
+  "version": "0.1.0",
+  "license": "0BSD",
+  "type": "module",
+  "description": "Model-planned code review workflows on the orc runtime: creation, running, and monitoring of the review workflow — nothing past it.",
+  "main": "src/index.ts",
+  "bin": {
+    "orc-review": "./bin/orc-review.mjs"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "cli": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@orc/core": "file:../orc/packages/core",
+    "@orc/executors": "file:../orc/packages/executors",
+    "@orc/harness-claude": "file:../orc/packages/harness-claude",
+    "@orc/harness-codex": "file:../orc/packages/harness-codex",
+    "@orc/ops": "file:../orc/packages/ops",
+    "@orc/sdk": "file:../orc/packages/sdk",
+    "@orc/ui": "file:../orc/packages/ui",
+    "commander": "^13.0.0",
+    "typescript": "^5.7.0",
+    "yaml": "^2.6.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "vitest": "^3.0.0"
+  }
+}

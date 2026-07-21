@@ -1,0 +1,564 @@
+<title>orc-review · canonical design</title>
+<style>
+  :root {
+    --paper: #f4f5f3;
+    --ink: #1c2126;
+    --ink-soft: #4c555e;
+    --ink-faint: #7d8790;
+    --line: #d8dcd9;
+    --card: #fbfcfa;
+    --law: #34667f;
+    --law-soft: #e3edf2;
+    --craft: #b07414;
+    --craft-soft: #f6ecd8;
+    --good: #2e7d4f;
+    --bad: #b3452e;
+    --bot-a: #34667f;
+    --bot-b: #8a5a9e;
+    --bot-c: #2e7d4f;
+    --code-bg: #eceeeb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #15181c; --ink: #dde2e6; --ink-soft: #a3adb6; --ink-faint: #6b757e;
+      --line: #2b3138; --card: #1b1f24; --law: #7db3cd; --law-soft: #1d2b33;
+      --craft: #dfa844; --craft-soft: #2e2716; --good: #6cbd8f; --bad: #d97b63;
+      --bot-a: #7db3cd; --bot-b: #b98fcc; --bot-c: #6cbd8f; --code-bg: #22262c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #15181c; --ink: #dde2e6; --ink-soft: #a3adb6; --ink-faint: #6b757e;
+    --line: #2b3138; --card: #1b1f24; --law: #7db3cd; --law-soft: #1d2b33;
+    --craft: #dfa844; --craft-soft: #2e2716; --good: #6cbd8f; --bad: #d97b63;
+    --bot-a: #7db3cd; --bot-b: #b98fcc; --bot-c: #6cbd8f; --code-bg: #22262c;
+  }
+  :root[data-theme="light"] {
+    --paper: #f4f5f3; --ink: #1c2126; --ink-soft: #4c555e; --ink-faint: #7d8790;
+    --line: #d8dcd9; --card: #fbfcfa; --law: #34667f; --law-soft: #e3edf2;
+    --craft: #b07414; --craft-soft: #f6ecd8; --good: #2e7d4f; --bad: #b3452e;
+    --bot-a: #34667f; --bot-b: #8a5a9e; --bot-c: #2e7d4f; --code-bg: #eceeeb;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0;
+    padding: 0 20px 96px;
+  }
+  main { max-width: 78ch; margin: 0 auto; }
+  .wide { max-width: 102ch; margin-left: auto; margin-right: auto; }
+
+  h1, h2, h3, .mono {
+    font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  h1 { font-size: 1.7rem; line-height: 1.25; letter-spacing: -0.01em; text-wrap: balance; margin: 0 0 6px; }
+  h2 { font-size: 1.12rem; margin: 60px 0 14px; padding-top: 22px; border-top: 1px solid var(--line); }
+  h3 { font-size: 0.95rem; margin: 26px 0 8px; }
+  p { margin: 0 0 14px; }
+  a { color: var(--law); }
+
+  header { padding: 56px 0 8px; }
+  .eyebrow {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-faint); margin-bottom: 14px;
+  }
+  .meta { color: var(--ink-soft); font-size: 0.94rem; margin-top: 10px; }
+
+  .stage-label {
+    display: inline-block; font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 3px; vertical-align: 2px;
+  }
+  .law-tag { background: var(--law-soft); color: var(--law); }
+  .craft-tag { background: var(--craft-soft); color: var(--craft); }
+
+  code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.85em; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px;
+    padding: 14px 16px; overflow-x: auto; line-height: 1.55; margin: 14px 0;
+  }
+  pre code { background: none; padding: 0; }
+
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 0.92rem; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th {
+    font-family: ui-monospace, Menlo, monospace; font-size: 0.7rem;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint);
+  }
+  .table-wrap { overflow-x: auto; }
+  td .mono, td code { font-size: 0.82rem; }
+
+  .invariant { border-left: 3px solid var(--law); padding: 2px 0 2px 18px; margin: 18px 0; }
+  .invariant strong:first-child { color: var(--law); }
+
+  .diagram {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 26px 22px; margin: 26px 0; overflow-x: auto;
+  }
+  .flow { display: flex; flex-direction: column; min-width: 620px; }
+  .tier { display: flex; align-items: stretch; justify-content: center; gap: 10px; }
+  .node {
+    border: 1px solid var(--line); border-radius: 6px; background: var(--paper);
+    padding: 8px 14px; text-align: center;
+    font-family: ui-monospace, Menlo, monospace; font-size: 0.78rem;
+  }
+  .node small { display: block; font-family: system-ui, sans-serif; font-size: 0.72rem; color: var(--ink-soft); margin-top: 2px; }
+  .node.law { border-color: var(--law); box-shadow: inset 3px 0 0 var(--law); }
+  .node.craft { border-color: var(--craft); box-shadow: inset 3px 0 0 var(--craft); background: var(--craft-soft); }
+  .lane { border-top: 3px solid var(--line); min-width: 96px; }
+  .lane.a { border-top-color: var(--bot-a); }
+  .lane.b { border-top-color: var(--bot-b); }
+  .lane.c { border-top-color: var(--bot-c); }
+  .lane.merged { border-top: 3px solid; border-image: linear-gradient(90deg, var(--bot-a) 50%, var(--bot-c) 50%) 1; }
+  .lane em { font-style: normal; color: var(--ink-faint); font-size: 0.68rem; display: block; }
+  .down { text-align: center; color: var(--ink-faint); font-size: 0.9rem; padding: 6px 0; }
+  .tier-label {
+    font-family: ui-monospace, Menlo, monospace; font-size: 0.66rem;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint);
+    text-align: center; margin: 2px 0 8px;
+  }
+  .agg { width: 100%; max-width: 480px; }
+  .legend { display: flex; gap: 18px; justify-content: center; margin-top: 18px; font-size: 0.78rem; color: var(--ink-soft); flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 14px; height: 4px; border-radius: 2px; display: inline-block; }
+
+  ul, ol { padding-left: 22px; margin: 0 0 14px; }
+  li { margin-bottom: 6px; }
+  .toc { columns: 2; column-gap: 40px; font-size: 0.92rem; margin: 18px 0 0; }
+  .toc li { break-inside: avoid; }
+  @media (max-width: 700px) { .toc { columns: 1; } }
+  .footnote { color: var(--ink-faint); font-size: 0.85rem; margin-top: 40px; border-top: 1px solid var(--line); padding-top: 14px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<main>
+<header>
+  <div class="eyebrow">orc-review · canonical design · v0.3 · 2026-07-20</div>
+  <h1>orc-review: model-planned code review workflows on the orc runtime</h1>
+  <p class="meta">
+    The complete engine design as implemented. orc-review owns exactly three things —
+    <strong>creation, running, and monitoring of one review workflow</strong> — plus a rendered
+    verdict. Publication, humans, webhooks, and PR lineage belong to a future service layer that
+    embeds this engine.
+  </p>
+  <ol class="toc">
+    <li><a href="#pipeline">The pipeline: law → craft → law</a></li>
+    <li><a href="#change">The change under review: repo sets</a></li>
+    <li><a href="#config">Configuration &amp; reviewer authoring</a></li>
+    <li><a href="#registry">The local bot registry</a></li>
+    <li><a href="#selection">Selection &amp; eligibility</a></li>
+    <li><a href="#planning">Planning: the flat lane layer</a></li>
+    <li><a href="#verification">Verification</a></li>
+    <li><a href="#execution">Execution on orc</a></li>
+    <li><a href="#aggregation">The aggregator</a></li>
+    <li><a href="#verdict">Verdict, completeness, rendering</a></li>
+    <li><a href="#surfaces">CLI &amp; library surfaces</a></li>
+    <li><a href="#invariants">Invariants</a></li>
+    <li><a href="#decisions">Decision log</a></li>
+    <li><a href="#deferred">Deferred: the service layer</a></li>
+  </ol>
+</header>
+
+<h2 id="pipeline">1 · The pipeline: <span class="stage-label law-tag">law</span> → <span class="stage-label craft-tag">craft</span> → <span class="stage-label law-tag">law</span></h2>
+
+<p>
+  Deterministic logic decides <em>who</em> reviews and <em>whether the result can be trusted</em>;
+  a model decides <em>how</em> the review runs. Every model output crosses a deterministic gate
+  before it matters.
+</p>
+
+<div class="diagram wide">
+  <div class="flow">
+    <div class="tier">
+      <div class="node law">resolve pins<small>repo set → pinned SHAs, fingerprints, dirty state</small></div>
+      <div class="node law">select + classify<small>per-repo cohort → eligible bots → lane union</small></div>
+      <div class="node craft">plan<small>a model authors the literal review.orc.ts</small></div>
+      <div class="node law">verify<small>AST contract + orc validate; template fallback</small></div>
+    </div>
+    <div class="down">↓ &nbsp;one orc run (pinned bundle · journal · monitor)</div>
+    <div class="tier-label">the flat lane layer — every lane of every eligible bot, concurrent; nothing else runs</div>
+    <div class="tier">
+      <div class="node lane merged">app/security + lib/security<em>same mandate, two repos · one merged execution</em></div>
+      <div class="node lane b">app/abhinav/0<em>correctness</em></div>
+      <div class="node lane b">app/abhinav/1<em>tests</em></div>
+      <div class="node lane c">mybot<em>local registry · advisory</em></div>
+    </div>
+    <div class="down">↓ all settled envelopes — no intermediate merge (depth 1)</div>
+    <div class="tier">
+      <div class="node craft agg">aggregator<small>aggressive cross-bot dedupe → one consolidated result · default gpt-5.6-sol</small></div>
+    </div>
+    <div class="down">↓</div>
+    <div class="tier">
+      <div class="node law">verdict + render<small>fail-closed algebra → Consolidated Review</small></div>
+    </div>
+  </div>
+  <div class="legend">
+    <span><span class="swatch" style="background:var(--law)"></span>deterministic law</span>
+    <span><span class="swatch" style="background:var(--craft)"></span>model craft</span>
+    <span><span class="swatch" style="background:linear-gradient(90deg,var(--bot-a) 50%,var(--bot-c) 50%)"></span>merged lane (union attribution)</span>
+  </div>
+</div>
+
+<h2 id="change">2 · The change under review: repo sets</h2>
+
+<p>
+  A review always runs over a <strong>set of repo pins, N ≥ 1</strong>. There is no single-repo
+  vs multi-repo mode anywhere in the engine — one repo is a set of size one. The caller names the
+  set; nothing is structurally discovered. This covers the plain case (<code>orc-review run</code>
+  in a checkout), the migration case (a library and its consumer reviewed together), and anything
+  a custom source can materialize.
+</p>
+
+<pre><code>orc-review run                                          # {git: "."} — one pin
+orc-review run --repo app=~/code/app@origin/main \
+               --repo lib=~/code/lib@origin/main        # a two-repo migration review
+orc-review run --repo github:acme/lib#412               # custom source, scheme-routed</code></pre>
+
+<h3>RepoPin — one repository's pinned change</h3>
+<pre><code>interface RepoPin {
+  id: string;            // caller alias (default: basename) — namespaces paths, bots, lanes
+  root: string;          // local checkout the lanes read
+  baseLabel: string;     // what was asked for ("origin/main")
+  baseSha: string;       // resolved merge-base — pinned SHA, never a branch name
+  headSha: string;
+  fingerprint: string;   // HEAD + index/worktree diff + untracked contents digest
+  dirty: boolean;
+  untracked: string[];
+  changedPaths: string[];  // repo-relative (selection facts for this pin)
+  diffBriefing: string;    // how an agent views this repo's change
+  configTree: Tree;        // trusted side for this repo's .orc-review (base tree)
+  headTree: Tree;
+}</code></pre>
+
+<h3>RepoSource — the extension seam</h3>
+<p>
+  A source's whole job: <em>materialize one repo's change locally and pin it</em>. <code>git</code>
+  (a local checkout) is built in; custom sources (a GitHub PR fetcher, an internal VCS) register in
+  <code>orc-review.config.(mjs|js)</code> — the single explicit extension point, no ambient
+  scanning — and are addressed by scheme (<code>github:acme/lib#412</code>). Source selection is
+  caller-side, never in the reviewed manifest (the source determines where the manifest comes
+  from). An optional <code>refresh(pin)</code> re-fingerprints for staleness (monotonic; reserved
+  for the service layer).
+</p>
+
+<h3>Dirty reviews are first-class</h3>
+<ul>
+  <li>The change under review is <strong>base → worktree</strong>: uncommitted and untracked work
+      is included, both in selection facts and in what lanes are briefed to diff.</li>
+  <li>Briefs pin the merge-base <strong>SHA</strong>, so a base branch moving mid-review cannot
+      skew lanes; dirty pins are briefed <code>git diff &lt;baseSha&gt;</code> with untracked files
+      listed explicitly.</li>
+  <li>Attempt identity is the <code>changeId</code>: for one pin, <code>headSha</code> or
+      <code>headSha12+fingerprint12</code>; for a set, <code>set-&lt;digest16&gt;[+dirty]</code>
+      over the ordered pin fingerprints. Same HEAD, different uncommitted edits → different
+      attempts, different plan files. The rendered header carries <code>+dirty</code>.</li>
+</ul>
+
+<h3>The composed workspace</h3>
+<p>
+  Lanes run read-only in <code>~/.orc-review/workspaces/&lt;changeId&gt;/</code> — a directory of
+  symlinks, one per pin, named by id. Uniform for N = 1. Agents address everything as
+  <code>&lt;repoId&gt;/&lt;path&gt;</code>; findings must anchor paths the same way (enforced by
+  the schema description and the brief), which is what makes inline-comment anchoring work against
+  the composed changed-path set.
+</p>
+
+<h3>Uncovered repos</h3>
+<p>
+  A pin whose base tree has no <code>.orc-review</code> <strong>fails the run</strong> by default —
+  silently reviewing half a migration is the one truly bad outcome. <code>--allow-uncovered</code>
+  opts into skipping it, rendered as a warning, and deterministically forces the verdict to
+  <code>PARTIAL — NOT APPROVED</code>: unjudged changes never approve.
+</p>
+
+<h2 id="config">3 · Configuration &amp; reviewer authoring</h2>
+
+<p>
+  Config is <strong>repository-owned</strong> and trusted <strong>only from the base tree</strong>
+  (<code>git show &lt;base&gt;:.orc-review/…</code>) — a PR cannot alter its own reviewers. Closed
+  schema throughout: unknown fields rejected, confined paths, no symlinks, one YAML document,
+  256&nbsp;KiB manifest cap, unique ids, rules must reference known reviewers.
+</p>
+
+<pre><code>.orc-review/
+├── manifest.yaml
+└── reviewers/
+    ├── security.md          # simple reviewer: frontmatter + prompt
+    └── abhinav/             # composite reviewer
+        ├── reviewer.yaml
+        └── prompts/*.md</code></pre>
+
+<pre><code># manifest.yaml
+version: 1
+reviewers:
+  - id: security
+    source: reviewers/security.md      # required: true is the default
+  - id: abhinav
+    source: reviewers/abhinav
+selection:
+  always: [security]
+  rules:
+    - id: backend
+      when: { any_changed_path: ["**/*.go", "src/**"] }
+      add: [abhinav]
+run:
+  budget: 5                    # reactive USD cap for the whole run
+  max_parallel: 8
+  aggregator_model: gpt-5.6-sol       # defaults shown; harness/effort too
+  aggregator_harness: codex
+planner:
+  model: claude-fable-5        # or disabled: true → template only</code></pre>
+
+<p>Simple reviewer — one markdown file:</p>
+<pre><code>---
+model: claude-sonnet-5
+can_block: true            # authority bits live here and in the manifest — never elsewhere
+---
+You are the security reviewer. Hunt for injection, authz, and secret-handling defects.</code></pre>
+
+<p>Composite reviewer — several lanes plus the bot's adjudication voice:</p>
+<pre><code># reviewers/abhinav/reviewer.yaml
+display_name: Abhinav
+can_block: true
+verbatim: false                        # true = never merged, models untouched
+lanes:
+  - { prompt: prompts/correctness.md, model: claude-opus-4-8 }
+  - { prompt: prompts/tests.md,       model: claude-sonnet-5 }
+aggregation_notes: prompts/adjudicate.md   # injected into the aggregator, attributed
+                                           # (rev 1's `synthesis:` accepted as alias)</code></pre>
+
+<p>
+  From the outside a bot is atomic — one id, selected, excluded, required, attributed as a unit.
+  Its lanes run in the flat layer; there is no per-bot synthesis stage. In a repo set, every bot
+  and lane is namespaced by pin id: bot <code>app/security</code>, lane
+  <code>app/security/prompt</code>, display "Security (app)".
+</p>
+
+<h2 id="registry">4 · The local bot registry</h2>
+
+<p>
+  Personal bots live once in <code>~/.orc-review/registry/</code> (same authoring formats) and are
+  called onto any run with <code>--with &lt;name&gt;</code>. Registry bots are <strong>advisory by
+  construction</strong>: <code>required</code>/<code>can_block</code> only ever come from a
+  reviewed repo's own manifest, so local bots are forced to
+  <code>required: false, can_block: false</code> regardless of what their files claim — the
+  deterministic severity cap (§10) enforces it downstream. They are labeled "(local)" in
+  attribution and provenance, excluded from Reviewer-Change classification, and cannot shadow a
+  repo-defined reviewer id. <code>orc-review bots</code> lists the registry. A repo that wants a
+  personal bot as a merge gate defines it in its own <code>.orc-review</code> like any reviewer.
+</p>
+
+<h2 id="selection">5 · Selection &amp; eligibility <span class="stage-label law-tag">law</span></h2>
+
+<p>
+  Both run <strong>per repo</strong>, with repo-relative facts — manifests never see namespacing.
+  Deterministic to the byte for identical inputs:
+</p>
+<ul>
+  <li><strong>Selection</strong> is the accumulative, order-independent union
+      <code>always ∪ additions from every matching rule ∪ eligible affinity</code> — no remove, no
+      first-match, no last-writer-wins. Sorted by manifest declaration order; per-bot reasons
+      (<code>always</code>, <code>rule:&lt;id&gt;</code>, <code>affinity</code>). The only inputs
+      are selection facts (changed paths); PR titles, authors, labels, clocks, and model judgment
+      are deliberately absent.</li>
+  <li><strong>Globs</strong>: <code>**</code> spans any number of path segments; other segments use
+      Go <code>path.Match</code> semantics (<code>*</code>, <code>?</code>, <code>[…]</code>).
+      Purely lexical.</li>
+  <li><strong>Reviewer Change</strong>: any changed path under <code>.orc-review/</code> in any pin.
+      Changed bots (content hash at base ≠ head) are excluded from execution; an uncompilable head
+      config marks every selected bot changed (fail closed). Any Reviewer Change caps the whole
+      run's verdict at ADVISORY.</li>
+</ul>
+
+<h2 id="planning">6 · Planning: the flat lane layer <span class="stage-label craft-tag">craft</span></h2>
+
+<p>
+  A planner model (default <code>claude-fable-5</code> via the <code>claude</code> CLI, pluggable)
+  authors the literal orc program. The execution shape is fixed — <strong>flat, depth 1</strong>:
+  the union of every eligible bot's lanes runs as one concurrent layer; exactly one aggregation
+  stage consolidates. Within that shape, the planner's craft is:
+</p>
+<ul>
+  <li><strong>Lane merging — the planner's whole craft</strong>: lanes from <em>different bots</em>
+      pursuing the same mandate (two security reviews, two test-run lanes — including across repos
+      in a set) merge into one execution. A merged prompt <em>concatenates each key's verbatim
+      text</em> — never paraphrases; the strongest declared model wins; the settled status reports
+      under every constituent key; findings attribute to the union of bots.
+      <code>verbatim: true</code> bots are exempt. When in doubt, don't merge.</li>
+  <li><strong>No support tier.</strong> Every agent call in the program is a judgment lane or the
+      aggregator — nothing else. A bot that wants extra work (running the test suite, cataloging
+      APIs) declares it as a lane, and lanes do their own legwork with their own tools; when
+      several bots want the same work, merging is what deduplicates it. The planner may append CTX
+      facts after (never instead of) a lane's verbatim text.</li>
+</ul>
+<p>
+  Judgment text is verbatim <em>by construction</em>: prompt bodies are injected into the program
+  header as <code>PROMPTS</code> constants and the planner only ever references them — it never
+  holds the text. Rejected programs retry once with verifier feedback; the final fallback is a
+  deterministic <strong>template generator</strong> (every lane independent, no merges, no
+  merges) that passes verification by construction. The program returns
+  <code>{ consolidated, laneOutcomes }</code>.
+</p>
+
+<h2 id="verification">7 · Verification <span class="stage-label law-tag">law</span></h2>
+
+<p>The planner proposes; a TypeScript-AST verifier disposes. Checked structurally on the assembled program:</p>
+<div class="table-wrap"><table>
+  <tr><th>Rule</th><th>Enforced as</th></tr>
+  <tr><td>Lane coverage</td><td>Every lane key of every eligible bot appears <strong>exactly once</strong> across tier 1; one call may carry several keys (a merged lane)</td></tr>
+  <tr><td>Verbatim judgment</td><td>Every prompt referencing <code>PROMPTS</code> must <em>start</em> with a <code>PROMPTS[…]</code> reference; string-literal keys only</td></tr>
+  <tr><td>Verbatim bots</td><td>Their keys sit in single-key calls — never merged</td></tr>
+  <tr><td>Schemas</td><td>Judgment calls carry <code>SCHEMAS.findings</code></td></tr>
+  <tr><td>No support tier</td><td>Every agent call is a judgment lane or the aggregator; any free-prompt call is rejected</td></tr>
+  <tr><td>Aggregation</td><td>Exactly one call with <code>SCHEMAS.consolidated</code>, prompt headed by <code>MERGE_PROMPT</code>, zero <code>PROMPTS</code> references</td></tr>
+  <tr><td>Escapes</td><td>No <code>readOnly</code>/<code>cwd</code>/<code>host</code> options, no <code>ext</code>, no redeclaring injected constants, phase names are string literals</td></tr>
+</table></div>
+<p>
+  Then orc's own <code>validate</code> compiles the program in the deterministic sandbox, previews
+  the first frontier, and live-probes every referenced harness/model/effort. Lane isolation ("no
+  lane's output in another lane's prompt") is stated to the planner but needs data-flow analysis to
+  prove; the structural rules plus read-only leaves bound the blast radius of a violation.
+</p>
+
+<h2 id="execution">8 · Execution on orc</h2>
+
+<p>
+  One orc run per attempt: the pinned program bundle (sha256 recorded) <em>is</em> the review spec,
+  the journal is the evidence trail, and orc's live monitor is the review UI — phase cards
+  (<code>review</code> / <code>aggregate</code>), per-lane rows with
+  harness · model · cost · duration, a self-contained <code>report.html</code>. Launch parameters:
+  cwd = the composed workspace, <code>approvalMode: auto</code>, <code>allowWrites: false</code>
+  (every leaf read-only, fail-closed), budget/maxParallel from the primary manifest or flags. The
+  brief injected into every leaf enumerates each repo's pinned diff instructions and the
+  path-addressing convention. Lane failures settle as envelopes; one failing lane never sinks the
+  run. Fail-forward resume and replay come from orc.
+</p>
+
+<h2 id="aggregation">9 · The aggregator <span class="stage-label craft-tag">craft</span></h2>
+
+<p>
+  The single depth-1 consolidation stage — the only place findings merge. Default model:
+  <strong><code>gpt-5.6-sol</code> on the codex harness</strong>
+  (<code>run.aggregator_model/harness/effort</code> to override). Inputs: every lane's settled
+  envelope labeled by key(s), the bot roster (ids, display names, authority bits, lane keys),
+  per-bot <code>aggregation_notes</code>, and the change facts. Its mandate — deliberately stronger
+  than any single bot's:
+</p>
+<ul>
+  <li>Same defect, any wording → one finding: worst source severity, union of sourcing bot ids.</li>
+  <li>Symptom chains collapse into their cause; the symptoms fold into its rationale.</li>
+  <li>The same defect at N sites → one finding enumerating the sites.</li>
+  <li>Adjacent nits about the same hunk coalesce.</li>
+  <li>Discipline: disagreement downgrades exactly one severity rank, never below nit; a blocking
+      finding is never dropped except by merging into another blocking finding; nothing is invented
+      that no lane reported.</li>
+  <li>Failure honesty: every errored lane becomes an omission; only if <em>every</em> lane errored
+      is readiness forced to <code>unknown</code> — otherwise it judges from the lanes that
+      succeeded.</li>
+  <li>Bot voice: a bot's <code>aggregation_notes</code> govern findings sourced only from its lanes
+      and weigh in cross-bot merges.</li>
+</ul>
+
+<h2 id="verdict">10 · Verdict, completeness, rendering <span class="stage-label law-tag">law</span></h2>
+
+<p>
+  The aggregator's output is <em>evidence, not authority</em> — a deterministic pass decides what
+  it can mean. Malformed or missing results parse to null and fail closed.
+</p>
+<div class="table-wrap"><table>
+  <tr><th>Deterministic rule</th><th>Effect</th></tr>
+  <tr><td>Lane failure semantics</td><td>A failed (or unreported) lane <em>degrades coverage</em> — noted in the review, not fatal. A bot is complete iff <strong>at least one</strong> of its lanes settled ok.</td></tr>
+  <tr><td>Completeness</td><td>run <code>completed</code> ∧ result parses ∧ every <em>required</em> bot has ≥1 surviving lane ∧ no uncovered repos ∧ readiness ≠ unknown</td></tr>
+  <tr><td>Authority cap</td><td>A blocking finding survives only if some sourcing bot has <code>can_block</code>; otherwise deterministically capped to SHOULD FIX (noted). Merged findings pass if <em>any</em> contributing bot can block.</td></tr>
+</table></div>
+<div class="table-wrap"><table>
+  <tr><th>Priority</th><th>Condition</th><th>Verdict</th><th>Action hint</th></tr>
+  <tr><td>1</td><td>Empty cohort</td><td><code>ABSTAINED</code></td><td>COMMENT</td></tr>
+  <tr><td>2</td><td>Surviving blocking finding</td><td><code>CHANGES REQUESTED</code></td><td>REQUEST_CHANGES</td></tr>
+  <tr><td>3</td><td>Not complete</td><td><code>PARTIAL — NOT APPROVED</code></td><td>COMMENT</td></tr>
+  <tr><td>4</td><td>Reviewer Change</td><td><code>ADVISORY — AUTOMATION CLEARED</code></td><td>COMMENT</td></tr>
+  <tr><td>5</td><td>Complete ∧ ready ∧ clean</td><td><code>APPROVED</code></td><td>APPROVE</td></tr>
+  <tr><td>6</td><td>Otherwise</td><td><code>REVIEWED</code></td><td>COMMENT</td></tr>
+</table></div>
+<p>
+  The rendered <strong>Consolidated Review</strong>: header
+  (<code>orc-review · VERDICT · &lt;changeId7&gt;[+dirty]</code>), Reviewed-by, coverage, summary,
+  warnings (reviewer change, uncovered repos, incomplete, degraded lane coverage, capped
+  severities), findings sorted by severity rank with
+  <code>MUST FIX / SHOULD FIX / CONSIDER / NIT</code> counts, per-finding why/fix/attribution,
+  omissions, and a collapsible run-details block. Inline-comment anchors are computed for findings
+  on changed files (for a future publisher) but every finding also stays in the body. A clean
+  approval says exactly "No findings survived scrutiny." — never padded.
+</p>
+<h3>Provenance (run details)</h3>
+<p>
+  Every review records: orc run id, per-repo pins (<code>base (sha) → head[+dirty]</code>), plan
+  origin + program sha256, aggregator harness · model, per-bot content hashes (local bots marked),
+  monitor URL, report path. "Which bots, at which content, reviewed which pinned change, under
+  which plan" is always answerable from the output alone.
+</p>
+
+<h2 id="surfaces">11 · CLI &amp; library surfaces</h2>
+
+<pre><code>orc-review validate                    # working-tree config check
+orc-review plan [--repo …]             # per-repo cohort, reasons, lanes — instant, no model
+orc-review plan --program              # …plus the planner-authored program (verifier-gated)
+orc-review run  [--repo …] [--with bot] [--budget N] [--allow-uncovered] [--open] [--json]
+orc-review bots                        # list the local registry
+# global: --dir/--base (single-repo sugar) · --repo [id=][scheme:]spec[@base] (repeatable)</code></pre>
+
+<pre><code>import { prepare, execute, review } from "orc-review";
+const outcome = await review({ repos: ["app=.", "lib=../lib@origin/main"] });
+outcome.evaluation.verdict;      // "APPROVED" | …
+outcome.rendered.body;           // Consolidated Review markdown
+outcome.rendered.inlineComments; // anchored findings for a future publisher
+outcome.monitorUrl;              // live monitor</code></pre>
+<p>
+  <code>prepare()</code> alone is the deterministic half (pins, cohort, classification, generated
+  program) with no launch — the seam a service layer builds on. <code>--json</code> everywhere.
+</p>
+
+<h2 id="invariants">12 · Invariants</h2>
+
+<div class="invariant"><p><strong>A Reviewer Change is never approved by automation.</strong> Advisory at best; a PR cannot nominate or alter its own reviewers (config trusted only from base trees).</p></div>
+<div class="invariant"><p><strong>Selection is deterministic.</strong> The planner chooses how reviewers run, never whether. Byte-identical cohorts for identical inputs.</p></div>
+<div class="invariant"><p><strong>Judgment is verbatim.</strong> Prompt text is injected, never model-rewritten; merging is concatenation with union attribution; there is no support tier — every call is a judgment lane or the aggregator.</p></div>
+<div class="invariant"><p><strong>Depth is exactly 1.</strong> Lanes produce findings; one aggregator merges them; nothing else merges judgment. Reviewers never see each other's output.</p></div>
+<div class="invariant"><p><strong>Authority is repo-granted.</strong> <code>required</code>/<code>can_block</code> bind only in a reviewed repo's base-tree manifest — never from the registry, a flag, or a lane.</p></div>
+<div class="invariant"><p><strong>Fail closed, degrade honestly.</strong> Malformed results, failed required bots, uncovered repos, unknown readiness → never approve. Partial lane failures degrade coverage and say so.</p></div>
+<div class="invariant"><p><strong>Everything reviews read-only from pinned state.</strong> SHAs not branch names; dirty state fingerprinted into the attempt identity; no leaf may write.</p></div>
+
+<h2 id="decisions">13 · Decision log</h2>
+
+<div class="table-wrap"><table>
+  <tr><th>Decision</th><th>Over</th><th>Why</th></tr>
+  <tr><td>orc runtime; generated program is the review spec</td><td>A dedicated review-execution protocol (admissions, receipts, asset stores)</td><td>Pinned bundle + journal give the same evidence with none of the extra machinery</td></tr>
+  <tr><td>Model-authored plans, deterministically verified</td><td>Fixed templates</td><td>Cross-bot optimization (lane merging) needs judgment; verification keeps it safe; template remains the fallback</td></tr>
+  <tr><td>Flat lane layer, depth 1, one aggressive aggregator</td><td>Per-reviewer phases with internal synthesis (rev 1)</td><td>One place for noise to die; simpler verifier; reviewer identity is attribution, not topology</td></tr>
+  <tr><td>Same-mandate lane merging (planner craft)</td><td>"Judgment lanes never merge"</td><td>Two security reviews should run once; concatenated verbatim + union attribution preserves both voices</td></tr>
+  <tr><td>Bot ok iff ≥1 lane ok; total wipeout → PARTIAL</td><td>All-lanes-ok</td><td>One flaky lane shouldn't fail a review; zero surviving judgment must</td></tr>
+  <tr><td>Aggregator defaults to gpt-5.6-sol (codex)</td><td>Inheriting a lane default</td><td>Highest-leverage single lane in the run; explicitly chosen, overridable per repo</td></tr>
+  <tr><td>Repo definitions + local registry</td><td>Catalogs, vendor+lock+sync, config layers</td><td>Repos keep authority with zero new infrastructure; personal bots live once and ride along advisory</td></tr>
+  <tr><td>Repo sets (N ≥ 1), caller-named, source-resolved</td><td>Single/multi-repo modes, structural workspace discovery</td><td>No modal code paths; migration reviews are first-class; custom fetchers plug in at exactly one seam</td></tr>
+  <tr><td>No support tier — every call is a lane or the aggregator</td><td>Planner-hoisted "preflight" stages</td><td>A test lane is just another lane; merging already deduplicates shared work, and the program shape stays two-stage flat</td></tr>
+  <tr><td>Uncovered repos fail by default</td><td>Silent skip</td><td>Reviewing half a migration while looking whole is the worst outcome; opt-in skip renders as PARTIAL</td></tr>
+</table></div>
+
+<h2 id="deferred">14 · Deferred: the service layer</h2>
+<p>
+  Explicitly out of engine scope, designed to compose around <code>prepare()/execute()</code> and
+  the rendered output: GitHub publication (action hints and inline anchors are already computed),
+  PR lineage/supersession and debounce, webhook ingest and reconciliation, human-review roles/SLAs/
+  Slack, staleness refresh via <code>RepoSource.refresh</code> (monotonic; verdict string
+  <code>STALE — NOT APPROVED</code> reserved), reviewer affinity, and repo enrollment.
+</p>
+
+<p class="footnote">
+  orc-review · canonical design v0.3 · engine at <code>~/coding/orc-review</code> · runtime at
+  <code>~/coding/orc</code>. Revision history lives in the decision log (§13).
+</p>
+</main>
