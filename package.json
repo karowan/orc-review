@@ -3,15 +3,18 @@
   "version": "0.1.0",
   "license": "0BSD",
   "type": "module",
-  "description": "Model-planned code review workflows on the orc runtime: creation, running, and monitoring of the review workflow — nothing past it.",
-  "main": "src/index.ts",
+  "description": "Model-planned code review workflows on the orc runtime: creation, running, and monitoring of the review workflow \u2014 nothing past it.",
+  "main": "dist/index.js",
   "bin": {
-    "orc-review": "./bin/orc-review.mjs"
+    "orc-review": "dist/cli.js"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "cli": "tsx src/cli.ts"
+    "cli": "tsx src/cli.ts",
+    "prepack": "npm run build && node scripts/publish-deps.mjs swap",
+    "postpack": "node scripts/publish-deps.mjs restore"
   },
   "dependencies": {
     "@orc/core": "file:../orc/packages/core",
@@ -30,5 +33,21 @@
     "@types/node": "^24.0.0",
     "tsx": "^4.19.0",
     "vitest": "^3.0.0"
+  },
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
