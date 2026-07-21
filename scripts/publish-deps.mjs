@@ -8,7 +8,7 @@ import * as fs from "node:fs";
 
 const PKG = new URL("../package.json", import.meta.url);
 const BAK = new URL("../package.json.prepack-backup", import.meta.url);
-const RANGE = "^0.1.0";
+const RANGE = "^0.1.1";
 
 const mode = process.argv[2];
 if (mode === "swap") {
