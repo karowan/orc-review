@@ -55,13 +55,15 @@ verify (deterministic) → one orc run → verdict + render (deterministic)
   `.orc-review/` is a Reviewer Change: altered reviewers are excluded and the
   verdict is capped at ADVISORY. Automation never approves changes to review
   authority.
-- **Plan** — a planner model (default `claude-fable-5` via the `claude` CLI)
+- **Plan** — a planner model (default `claude-fable-5` via the `claude` CLI;
+  `planner.harness: codex` uses subscription-authenticated Codex)
   authors the literal orc program as a **flat lane layer**: the union of every
-  eligible bot's lanes, concurrent, depth 1. Its craft is **merging
-  same-mandate lanes across bots** (two security reviews → one execution,
-  verbatim texts concatenated, findings attributed to both bots, strongest
-  declared model wins). There is no support tier — a test lane is just another
-  lane, and merging is what deduplicates shared work. `--no-planner` (or
+  eligible bot's lanes, concurrent, depth 1. Its craft is **packing compatible
+  lanes within or across bots** into fewer executions (verbatim texts
+  concatenated, findings attributed to every included lane, strongest declared
+  model wins). `planner.max_calls` plus `planner.required: true` makes that
+  optimization a verified ceiling rather than a suggestion. There is no support
+  tier — a test lane is just another lane. `--no-planner` (or
   `planner.disabled: true`) uses a deterministic template that never merges.
 - **Verify** — an AST verifier enforces the contract: every lane key exactly
   once (merged calls may carry several), judgment prompts verbatim-headed from
@@ -112,7 +114,11 @@ selection:
 run:
   budget: 5           # reactive USD cap for the run
 planner:
-  model: claude-fable-5
+  harness: codex
+  effort: medium
+  max_calls: 6
+  required: true
+  model: gpt-5.6-sol
 ```
 
 Simple reviewer (`reviewers/security.md`) — frontmatter + prompt:

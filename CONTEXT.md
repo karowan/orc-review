@@ -33,8 +33,8 @@ fail-closed verdicts) predate this repo; the execution paradigm is orc's.
    selection rules, and diff facts, and authors the literal `review.orc.ts` —
    one program, one run, one promise graph, **flat** (rev 2): the union of every
    eligible bot's lanes runs as one concurrent layer with no per-reviewer
-   structure. The planner's craft is exactly one thing: **merging same-mandate
-   lanes across bots** (and repos) into single executions — merged prompts
+   structure. The planner's craft is exactly one thing: **packing compatible
+   lanes within or across bots** (and repos) into fewer executions — merged prompts
    concatenate each key's verbatim text, attribution is the union of bots, the
    strongest declared model wins, `verbatim: true` bots are exempt. There is no
    support tier: every agent call is a judgment lane or the aggregator; a bot
@@ -47,8 +47,10 @@ fail-closed verdicts) predate this repo; the execution paradigm is orc's.
    aggregator (free-prompt calls are rejected); exactly one
    aggregator call (MERGE_PROMPT-headed, `SCHEMAS.consolidated`, zero PROMPTS
    refs); no `readOnly`/`cwd`/`host`/`ext` escapes. Then `orc validate`
-   live-probes harnesses, models, and efforts. Bounded retry with feedback;
-   final fallback is a deterministic template generator (which never merges).
+   live-probes harnesses, models, and efforts. `planner.max_calls` is enforced
+   over judgment calls. Bounded retry includes verifier feedback; when
+   `planner.required: true`, invalid planning fails closed rather than expanding
+   into the deterministic unmerged fallback.
 5. **Run.** One orc run: pinned bundle (its sha256 is the review spec), journal
    as the evidence trail, orc's monitor as the review UI. All leaves read-only.
    The single **aggregator** (default `gpt-5.6-sol` on codex; `run.aggregator_*`
@@ -78,8 +80,10 @@ fail-closed verdicts) predate this repo; the execution paradigm is orc's.
   Every call is a judgment lane or the aggregator; no lane's output reaches
   another lane; judgment prompt text is injected, never planner-rewritten — a
   merged lane concatenates verbatim texts, it does not unify them.
-- **Fail-closed everywhere**: verification failure degrades to the template
-  plan; lane failure of a required reviewer degrades the verdict, never hides.
+- **Fail-closed everywhere**: ordinary verification failure degrades to the
+  template plan; a required or call-capped planner fails the review instead of
+  violating its cap. Lane failure of a required reviewer degrades the verdict,
+  never hides.
 
 ## Reviewer authoring
 

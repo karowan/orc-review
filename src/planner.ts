@@ -7,12 +7,15 @@
  * template generator is the fallback.
  */
 import { execFile } from "node:child_process";
+import os from "node:os";
 import type { CompiledReviewer, Facts } from "./contracts.js";
 
 /** Pluggable plan model: planner prompt in, program body (or fenced text) out. */
 export type PlanModel = (prompt: string) => Promise<string>;
 
 export const DEFAULT_PLANNER_MODEL = "claude-fable-5";
+export const DEFAULT_CODEX_PLANNER_MODEL = "gpt-5.6-sol";
+export const DEFAULT_CODEX_PLANNER_EFFORT = "medium";
 
 /** Runs the planner through the local `claude` CLI (user's own auth). */
 export function claudeCliPlanner(model: string = DEFAULT_PLANNER_MODEL): PlanModel {
@@ -22,6 +25,42 @@ export function claudeCliPlanner(model: string = DEFAULT_PLANNER_MODEL): PlanMod
         "claude",
         ["-p", "--model", model, "--output-format", "text"],
         { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 300_000 },
+        (err, stdout, stderr) => {
+          if (err) reject(new Error(`planner model failed: ${err.message}\n${stderr.slice(0, 2000)}`));
+          else resolve(stdout);
+        },
+      );
+      child.stdin?.write(prompt);
+      child.stdin?.end();
+    });
+}
+
+/** Runs the planner through the local `codex` CLI (user's own subscription auth). */
+export function codexCliPlanner(
+  model: string = DEFAULT_CODEX_PLANNER_MODEL,
+  effort: string = DEFAULT_CODEX_PLANNER_EFFORT,
+): PlanModel {
+  return (prompt) =>
+    new Promise((resolve, reject) => {
+      const child = execFile(
+        "codex",
+        [
+          "exec",
+          "--model",
+          model,
+          "--sandbox",
+          "read-only",
+          "--ephemeral",
+          "--ignore-user-config",
+          "--ignore-rules",
+          "--skip-git-repo-check",
+          "-c",
+          `approval_policy="never"`,
+          "-c",
+          `model_reasoning_effort=${JSON.stringify(effort)}`,
+          "-",
+        ],
+        { cwd: os.tmpdir(), encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 300_000 },
         (err, stdout, stderr) => {
           if (err) reject(new Error(`planner model failed: ${err.message}\n${stderr.slice(0, 2000)}`));
           else resolve(stdout);
@@ -47,14 +86,15 @@ export function plannerPrompt(args: {
   matchedRules: string[];
   feedback?: string[]; // verifier problems from a prior attempt
   priorBody?: string;
+  maxCalls?: number;
 }): string {
-  const { reviewers, facts, matchedRules, feedback, priorBody } = args;
+  const { reviewers, facts, matchedRules, feedback, priorBody, maxCalls } = args;
   const reviewerBlocks = reviewers
     .map((r) => {
       const lanes = r.lanes
         .map(
           (l) =>
-            `  lane PROMPTS[${JSON.stringify(l.promptKey)}]${l.model ? ` model=${l.model}` : ""}${l.harness ? ` harness=${l.harness}` : ""}${l.reasoningEffort ? ` effort=${l.reasoningEffort}` : ""}\n    excerpt: ${JSON.stringify(excerpt(l.promptText, 800))}`,
+            `  lane PROMPTS[${JSON.stringify(l.promptKey)}] source=${JSON.stringify(l.promptPath)}${l.model ? ` model=${l.model}` : ""}${l.harness ? ` harness=${l.harness}` : ""}${l.reasoningEffort ? ` effort=${l.reasoningEffort}` : ""}\n    excerpt: ${JSON.stringify(excerpt(l.promptText, 800))}`,
         )
         .join("\n");
       return `- bot "${r.id}" (${r.displayName})${r.canBlock ? "" : " [cannot block]"}${r.verbatim ? " [VERBATIM: this bot's lanes must run as declared — never merged, models/efforts untouched]" : ""}${r.plannerHints ? `\n  hints: ${r.plannerHints}` : ""}${r.aggregationNotes ? `\n  (has aggregation notes — injected for you as NOTES[${JSON.stringify(r.id)}])` : ""}\n${lanes}`;
@@ -69,14 +109,17 @@ A header is prepended for you (do NOT write it): PROMPTS (verbatim lane prompt t
 
 THE SHAPE (depth 1 — a deterministic verifier rejects violations):
 - The flat lane layer: every PROMPTS key listed below runs EXACTLY ONCE, all lanes concurrent, each with schema: SCHEMAS.findings. A lane prompt must START with a PROMPTS[...] reference; you may append CTX facts after it. Never inline or paraphrase judgment text. No lane's output may appear in another lane's prompt.
+- The verifier recognizes the prompt head structurally. Write each merged prompt literally as a template beginning with the first injected reference, for example: prompt: \`\${PROMPTS["bot/lanes/0"]}\\n\\n\${PROMPTS["bot/lanes/1"]}\\n\\nChanged paths: \${JSON.stringify(CTX.changedPaths)}\`. Do not build it with arrays, join(), a helper, an intermediate variable, string-prefix text, or any expression before the first PROMPTS reference.
 - There is NO support tier: every agent call is either a judgment lane or the aggregator — nothing else. A bot that wants extra work (running the test suite, cataloging APIs) has declared it as a lane; lanes do their own legwork with their own tools.
-- MERGING (your key judgment call): when lanes from DIFFERENT bots pursue the same review mandate (e.g. two security reviews, two test-run lanes — including across repos), merge them into ONE agent call: its prompt starts with one PROMPTS ref and appends each other merged key's full PROMPTS ref (template interpolation — the verbatim texts concatenate), then any CTX facts. Pick the strongest declared model/effort among the merged lanes. The merged call settles once; report its status under EVERY constituent key in laneOutcomes. Never merge lanes of a [VERBATIM] bot. When in doubt, don't merge.
+- MERGING (your key judgment call): minimize the number of judgment agent calls while preserving every requested lane. Merge compatible lanes from the SAME bot or DIFFERENT bots into ONE agent call whenever one workspace investigation can satisfy their prompts. Mandates may be complementary rather than identical (for example correctness + backcompat + security, or product + UX + design-system); the merged leaf returns the union of their findings. Its prompt starts with one PROMPTS ref and appends every other merged key's full PROMPTS ref (template interpolation — verbatim texts concatenate), then any CTX facts. Pick the strongest declared model/effort among the merged lanes. The merged call settles once; report its status under EVERY constituent key in laneOutcomes. Never merge lanes of a [VERBATIM] bot.
 - Aggregation: EXACTLY ONE agent call with schema: SCHEMAS.consolidated, options from AGG (harness: AGG.harness, model: AGG.model, reasoningEffort: AGG.reasoningEffort). Its prompt starts with MERGE_PROMPT and must include: JSON.stringify(CTX.reviewers), JSON.stringify(NOTES), and every lane's settled envelope labeled by its key(s). It must not reference PROMPTS.
+- Write the aggregator prompt literally as a template beginning \`\${MERGE_PROMPT}\`, not through an intermediate variable, concatenation helper, or prefixed text.
 - Never write these option keys: readOnly, cwd, host. Never touch ext. Never redeclare the injected constants.
 - Return { consolidated, laneOutcomes } where laneOutcomes maps EVERY PROMPTS key to the settled status ("ok" | "error") of the call that ran it. Use settle()/parallel envelopes so one failing lane never sinks the run.
 
 CRAFT:
-- Merging is your whole craft: find the same-mandate lanes, run them once, attribute to everyone. All lanes concurrent, aggregator last.
+- Merging is your whole craft: aggressively pack compatible requested perspectives into the fewest leaves and attribute each result to every included key. Do not preserve one-call-per-lane merely because the source declarations are separate. All leaves remain concurrent; aggregator last.
+${maxCalls === undefined ? "" : `- HARD LIMIT: use at most ${maxCalls} judgment agent calls total. Every PROMPTS key must still appear exactly once. A plan over this limit is rejected.\n`}- Prefer broad, coherent work packets over tiny aspect calls. Split only for [VERBATIM] lanes, materially incompatible investigations, or model/tool requirements that cannot share one leaf.
 - Use phase("review") / phase("aggregate") for the monitor; give every call a clear id (lane calls: their key; merged calls: a "+"-joined id).
 - Open with a // PLAN: comment stating each merge and why (or "no merges").
 

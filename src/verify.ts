@@ -28,7 +28,11 @@ interface JudgmentCall {
   where: string;
 }
 
-export function verifyProgram(source: string, reviewers: CompiledReviewer[]): string[] {
+export function verifyProgram(
+  source: string,
+  reviewers: CompiledReviewer[],
+  limits: { maxJudgmentCalls?: number } = {},
+): string[] {
   const problems: string[] = [];
   const sf = ts.createSourceFile("review.orc.ts", source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
 
@@ -209,6 +213,11 @@ export function verifyProgram(source: string, reviewers: CompiledReviewer[]): st
   for (const key of knownKeys) {
     const n = usage.get(key) ?? 0;
     if (n !== 1) problems.push(`lane PROMPTS[${JSON.stringify(key)}] must run exactly once, found ${n}`);
+  }
+  if (limits.maxJudgmentCalls !== undefined && judgmentCalls.length > limits.maxJudgmentCalls) {
+    problems.push(
+      `plan uses ${judgmentCalls.length} judgment calls; planner.max_calls permits at most ${limits.maxJudgmentCalls}`,
+    );
   }
 
   if (consolidatedCalls.length !== 1) {

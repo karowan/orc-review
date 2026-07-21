@@ -69,6 +69,22 @@ export default async ({ agent, parallel, phase }) => {
     expect(verifyProgram(wrap(body), reviewers)).toEqual([]);
   });
 
+  it("enforces the planner judgment-call ceiling without dropping lane keys", () => {
+    const body = `// PLAN: no merges
+export default async ({ agent, parallel, phase }) => {
+  const lanes = await phase("review", () => parallel([
+    { prompt: PROMPTS["security/prompt"], schema: SCHEMAS.findings },
+    { prompt: PROMPTS["abhinav/lanes/0"], schema: SCHEMAS.findings },
+    { prompt: PROMPTS["abhinav/lanes/1"], schema: SCHEMAS.findings },
+  ]));
+  ${AGG_CALL}
+  return { consolidated, laneOutcomes: { "security/prompt": lanes[0].status, "abhinav/lanes/0": lanes[1].status, "abhinav/lanes/1": lanes[2].status } };
+};`;
+    expect(verifyProgram(wrap(body), reviewers, { maxJudgmentCalls: 2 }).join()).toContain(
+      "plan uses 3 judgment calls; planner.max_calls permits at most 2",
+    );
+  });
+
   it("rejects merging a verbatim bot's lane", () => {
     const verbatimReviewers = reviewers.map((r) =>
       r.id === "security" ? { ...r, verbatim: true } : r,

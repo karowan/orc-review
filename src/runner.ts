@@ -23,7 +23,16 @@ import {
   type SelectionResult,
 } from "./contracts.js";
 import { classify } from "./eligibility.js";
-import { claudeCliPlanner, extractProgramBody, plannerPrompt, DEFAULT_PLANNER_MODEL, type PlanModel } from "./planner.js";
+import {
+  claudeCliPlanner,
+  codexCliPlanner,
+  extractProgramBody,
+  plannerPrompt,
+  DEFAULT_CODEX_PLANNER_EFFORT,
+  DEFAULT_CODEX_PLANNER_MODEL,
+  DEFAULT_PLANNER_MODEL,
+  type PlanModel,
+} from "./planner.js";
 import { render, type RenderedReview } from "./render.js";
 import { loadLocalReviewers } from "./registry.js";
 import { select } from "./selection.js";
@@ -233,10 +242,18 @@ export async function prepare(opts: ReviewOptions): Promise<PreparedReview> {
   let source: string | undefined;
   let plannerUsed: "model" | "template" = "template";
 
+  const plannerConfig = primaryManifest?.planner;
+  const configuredPlanner = () => {
+    if (plannerConfig?.harness === "codex") {
+      return codexCliPlanner(
+        plannerConfig.model ?? DEFAULT_CODEX_PLANNER_MODEL,
+        plannerConfig.effort ?? DEFAULT_CODEX_PLANNER_EFFORT,
+      );
+    }
+    return claudeCliPlanner(plannerConfig?.model ?? DEFAULT_PLANNER_MODEL);
+  };
   const planModel =
-    opts.planner === null || primaryManifest?.planner.disabled
-      ? null
-      : (opts.planner ?? claudeCliPlanner(primaryManifest?.planner.model ?? DEFAULT_PLANNER_MODEL));
+    opts.planner === null || plannerConfig?.disabled ? null : (opts.planner ?? configuredPlanner());
 
   if (planModel) {
     let feedback: string[] | undefined;
@@ -245,11 +262,20 @@ export async function prepare(opts: ReviewOptions): Promise<PreparedReview> {
       progress(attempt === 0 ? "planning the review program" : "re-planning after verifier feedback");
       try {
         const raw = await planModel(
-          plannerPrompt({ reviewers: eligible, facts, matchedRules, feedback, priorBody }),
+          plannerPrompt({
+            reviewers: eligible,
+            facts,
+            matchedRules,
+            feedback,
+            priorBody,
+            maxCalls: plannerConfig?.maxCalls,
+          }),
         );
         const body = extractProgramBody(raw);
         const candidate = assemble(assembly, body);
-        const problems = verifyProgram(candidate, eligible);
+        const problems = verifyProgram(candidate, eligible, {
+          maxJudgmentCalls: plannerConfig?.maxCalls,
+        });
         if (problems.length === 0) {
           source = candidate;
           plannerUsed = "model";
@@ -266,6 +292,11 @@ export async function prepare(opts: ReviewOptions): Promise<PreparedReview> {
   }
 
   if (!source) {
+    if (plannerConfig?.required) {
+      throw new Error(
+        `required planner did not produce a valid program:\n  ${rejectedPlans.flat().join("\n  ")}`,
+      );
+    }
     progress(planModel ? "planner rejected; falling back to the template plan" : "using the template plan");
     source = assemble(assembly, templateProgram(eligible));
     const problems = verifyProgram(source, eligible);

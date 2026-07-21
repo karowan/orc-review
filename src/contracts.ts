@@ -44,7 +44,14 @@ export interface Manifest {
     aggregatorHarness?: string;
     aggregatorEffort?: string;
   };
-  planner: { model?: string; disabled?: boolean };
+  planner: {
+    harness?: "claude" | "codex";
+    model?: string;
+    effort?: string;
+    maxCalls?: number;
+    required?: boolean;
+    disabled?: boolean;
+  };
 }
 
 // --- compiled reviewers -----------------------------------------------------

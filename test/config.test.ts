@@ -52,6 +52,12 @@ describe("loadConfig", () => {
     expect(problemsOf(files).join()).toMatch(/mystery|unrecognized/i);
   });
 
+  it("requires fail-closed planning when max_calls is configured", () => {
+    const files = fixtureFiles();
+    files[".orc-review/manifest.yaml"] += "\nplanner:\n  max_calls: 2\n";
+    expect(problemsOf(files).join()).toContain("planner.max_calls requires planner.required: true");
+  });
+
   it("rejects duplicate reviewer ids", () => {
     const files = fixtureFiles();
     files[".orc-review/manifest.yaml"] = files[".orc-review/manifest.yaml"].replace(

@@ -74,7 +74,11 @@ const ManifestSchema = z
       .default({}),
     planner: z
       .object({
+        harness: z.enum(["claude", "codex"]).optional(),
         model: z.string().optional(),
+        effort: z.string().optional(),
+        max_calls: z.number().int().min(1).max(64).optional(),
+        required: z.boolean().optional(),
         disabled: z.boolean().optional(),
       })
       .strict()
@@ -329,8 +333,22 @@ export function loadConfig(tree: Tree): ReviewConfig {
       aggregatorHarness: m.run.aggregator_harness,
       aggregatorEffort: m.run.aggregator_effort,
     },
-    planner: { model: m.planner.model, disabled: m.planner.disabled },
+    planner: {
+      harness: m.planner.harness,
+      model: m.planner.model,
+      effort: m.planner.effort,
+      maxCalls: m.planner.max_calls,
+      required: m.planner.required,
+      disabled: m.planner.disabled,
+    },
   };
+
+  if (manifest.planner.disabled && manifest.planner.required) {
+    problems.push("planner cannot be both disabled and required");
+  }
+  if (manifest.planner.maxCalls !== undefined && !manifest.planner.required) {
+    problems.push("planner.max_calls requires planner.required: true so fallback cannot exceed the cap");
+  }
 
   // Structural rules.
   const ids = new Set<string>();
