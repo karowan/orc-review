@@ -5,6 +5,7 @@
  */
 import { Command } from "commander";
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { loadConfig, ConfigError } from "./config.js";
 import { worktreeTree } from "./git.js";
 import { prepare, review, type ReviewOptions } from "./runner.js";
@@ -14,7 +15,8 @@ const program = new Command("orc-review")
   .description("model-planned code review workflows on the orc runtime")
   .option("--dir <path>", "repository directory (single-repo sugar)", ".")
   .option("--base <ref>", "trusted base ref (single-repo sugar)", "origin/main")
-  .option("--repo <repo...>", "repo set entry: [id=][scheme:]spec[@base] (repeatable)");
+  .option("--repo <repo...>", "repo set entry: [id=][scheme:]spec[@base] (repeatable)")
+  .option("--context-file <path>", "trusted coordinator metadata/evidence supplied to every review lane");
 
 const fail = (message: string): never => {
   console.error(message);
@@ -31,6 +33,8 @@ interface CommonLocal {
 
 const reviewOptions = (cmd: Command, local: CommonLocal): ReviewOptions => {
   const g = cmd.optsWithGlobals();
+  const context = g.contextFile ? readFileSync(g.contextFile, "utf8") : undefined;
+  if (context && Buffer.byteLength(context) > 64 * 1024) fail("--context-file exceeds 65536 bytes");
   return {
     repos: g.repo,
     dir: g.dir,
@@ -39,6 +43,7 @@ const reviewOptions = (cmd: Command, local: CommonLocal): ReviewOptions => {
     planner: local.planner === false ? null : undefined,
     withBots: local.with,
     registryDir: local.registry,
+    context,
     onProgress: (m) => console.error(m),
   };
 };

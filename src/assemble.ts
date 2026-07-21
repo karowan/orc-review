@@ -35,7 +35,9 @@ export const MERGE_PROMPT = `You are the aggregator — the single consolidation
 - Adjacent nits coalesce: low-severity observations about the same hunk merge into a single entry.
 - Severity discipline: disagreement may downgrade a finding exactly one rank, never below nit. Never drop a blocking finding except by merging it into another blocking finding. Never invent findings no lane reported.
 - Attribution: "reviewers" arrays may only contain the bot ids you were given. Honor each bot's aggregation notes (NOTES) when judging findings sourced only from that bot's lanes; weigh them when merging across bots.
-- Failure honesty: every errored lane becomes an omission. If EVERY lane errored, set readiness to "unknown". Otherwise judge from the lanes that succeeded.
+- Failure honesty: every errored lane becomes a lane_failure omission and its reason preserves the native error text (auth, quota, timeout, access, or schema); never replace a known cause with a generic schema guess. If EVERY lane errored, set readiness to "unknown". Otherwise judge from the lanes that succeeded.
+- Omission taxonomy is closed: lane_failure (a reviewer execution failed), test_not_run (an applicable check could not execute), external_context (required remote/CI metadata was not supplied), evidence_gap (an applicable runtime or artifact was unavailable). Normalize lane-provided spellings into those four values.
+- Applicability is not failure: do not emit an omission merely because a change has no UI, runtime, migration, or other surface that does not apply. Mention applicable residual risk in coverage or summary instead.
 - readiness: "ready" only if the change is safe to land as-is given the surviving findings; else "not_ready" (or "unknown" per the rule above).
 - summary: two sentences max, plain prose.`;
 

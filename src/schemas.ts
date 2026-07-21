@@ -4,6 +4,8 @@
  */
 import type { Json } from "@karowanorg/orc-sdk/program";
 
+export const OMISSION_KINDS = ["lane_failure", "test_not_run", "external_context", "evidence_gap"] as const;
+
 const FINDING_PROPS: Record<string, Json> = {
   severity: { enum: ["blocking", "warning", "consider", "nit"] },
   title: { type: "string" },
@@ -77,7 +79,7 @@ export const CONSOLIDATED_SCHEMA: Json = {
         additionalProperties: false,
         required: ["kind", "subject", "reason"],
         properties: {
-          kind: { type: "string" },
+          kind: { enum: [...OMISSION_KINDS] },
           subject: { type: "string" },
           reason: { type: "string" },
         },
