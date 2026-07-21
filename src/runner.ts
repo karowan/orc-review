@@ -383,7 +383,7 @@ export async function execute(p: PreparedReview, opts: ReviewOptions): Promise<R
   const orc = new Orc({ cwd: workspaceDir, defaultHarness: primaryManifest?.run.defaultHarness });
 
   progress("validating plan against live harness capabilities");
-  const validation = await orc.validate({ programPath: p.programPath });
+  const validation = await orc.validate({ programPath: p.programPath, ...REVIEW_RUN_POLICY });
   if (validation.problems.length > 0) {
     throw new Error(`orc rejected the plan:\n  ${validation.problems.join("\n  ")}`);
   }
