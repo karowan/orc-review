@@ -179,7 +179,7 @@ generated program) without launching anything.
 ## Development
 
 ```
-npm install       # links the sibling ../orc checkout
+npm install       # installs the published orc runtime packages
 npm test
 npm run typecheck
 ```
