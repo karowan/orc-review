@@ -8,7 +8,13 @@ import * as fs from "node:fs";
 
 const PKG = new URL("../package.json", import.meta.url);
 const BAK = new URL("../package.json.prepack-backup", import.meta.url);
-const RANGE = "^0.1.1";
+const RANGES = {
+  "@karowanorg/orc-core": "^0.1.2",
+  "@karowanorg/orc-harness-claude": "^0.1.3",
+  "@karowanorg/orc-harness-codex": "^0.1.3",
+  "@karowanorg/orc-ops": "^0.1.2",
+  "@karowanorg/orc-sdk": "^0.1.2",
+};
 
 const mode = process.argv[2];
 if (mode === "swap") {
@@ -16,7 +22,7 @@ if (mode === "swap") {
   const pkg = JSON.parse(fs.readFileSync(PKG, "utf8"));
   for (const [name, spec] of Object.entries(pkg.dependencies)) {
     if (name.startsWith("@karowanorg/orc-") && String(spec).startsWith("file:")) {
-      pkg.dependencies[name] = RANGE;
+      pkg.dependencies[name] = RANGES[name] ?? "^0.1.1";
     }
   }
   fs.writeFileSync(PKG, `${JSON.stringify(pkg, null, 2)}\n`);

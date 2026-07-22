@@ -39,7 +39,7 @@ import { loadLocalReviewers } from "./registry.js";
 import { select } from "./selection.js";
 import { parseRepoArg, resolvePins, type RepoArg } from "./sources.js";
 import { templateProgram } from "./template.js";
-import { evaluate, parseProgramResult, type Evaluation } from "./verdict.js";
+import { evaluate, parseProgramResult, type Evaluation, type ParsedProgramResult } from "./verdict.js";
 import { verifyProgram } from "./verify.js";
 import { composeWorkspace } from "./workspace.js";
 
@@ -73,6 +73,7 @@ export const REVIEW_RUN_POLICY = {
   approvalMode: "auto",
   allowWrites: true,
   sandbox: true,
+  networkAccess: true,
 } as const;
 // tradeoff: concurrent leaves share one disposable worktree; this supports
 // ordinary test/build artifacts, but tests that rewrite tracked sources can
@@ -455,9 +456,66 @@ Your working directory mounts each repo by id:
 ${repoLines}
 Review ONLY those changes; the working trees are their authoritative state. Run the git commands above INSIDE the repo's directory. Read surrounding files as needed.
 Reference every file in findings as <repoId>/<path> (e.g. ${p.pins[0].id}/src/main.ts).
-The repositories are disposable review worktrees. You may run tests and create build, cache, or temporary files inside the allowed workspace, but do not alter tracked source files, commit, push, publish, or change anything outside it.
+The repositories are disposable review worktrees. You may use the internet and external documentation/tools, run tests, and create build, cache, or temporary files inside the allowed workspace, but do not alter tracked source files, commit, push, publish, or change anything outside it.
 Return the requested structured result directly to the orchestrator. Source-reviewer instructions about \`$REPO_DIR\`, \`$FINDINGS_OUTPUT_PATH\`, writing a findings file, or independently fetching GitHub metadata describe their original transport and are replaced by this contract. Do not invoke GitHub; use the coordinator context below when present.
 ${suppliedContext}Report genuine findings only — do not pad; an empty findings list is a valid result.`;
+}
+
+function safeRelative(raw: string): string | undefined {
+  const normalized = path.posix.normalize(raw.replaceAll("\\", "/"));
+  return normalized !== "." && normalized !== ".." && !normalized.startsWith("../") && !path.posix.isAbsolute(normalized)
+    ? normalized
+    : undefined;
+}
+
+/** Normalize model-authored finding locations at the trusted repo boundary. */
+export function normalizeFindingPaths(
+  result: ParsedProgramResult | null,
+  pins: RepoPin[],
+): ParsedProgramResult | null {
+  if (!result) return null;
+  const normalize = (raw: string): string | undefined => {
+    if (path.isAbsolute(raw)) {
+      for (const pin of pins) {
+        const relative = path.relative(pin.root, raw);
+        const safe = safeRelative(relative);
+        if (safe && relative !== ".." && !relative.startsWith(`..${path.sep}`)) {
+          return pins.length === 1 ? safe : `${pin.id}/${safe}`;
+        }
+      }
+      return undefined;
+    }
+    for (const pin of pins) {
+      if (raw === pin.id || !raw.startsWith(`${pin.id}/`)) continue;
+      const safe = safeRelative(raw.slice(pin.id.length + 1));
+      return safe ? (pins.length === 1 ? safe : `${pin.id}/${safe}`) : undefined;
+    }
+    return pins.length === 1 ? safeRelative(raw) : undefined;
+  };
+  return {
+    ...result,
+    consolidated: {
+      ...result.consolidated,
+      findings: result.consolidated.findings.map((finding) => {
+        if (!finding.path) return finding;
+        const normalized = normalize(finding.path);
+        return normalized ? { ...finding, path: normalized } : { ...finding, path: undefined, line: undefined };
+      }),
+    },
+  };
+}
+
+export function reviewCacheEnvironment(workspaceDir: string): Record<string, string> {
+  const cache = path.join(workspaceDir, ".cache");
+  return {
+    TMPDIR: path.join(cache, "tmp"),
+    GOCACHE: path.join(cache, "go-build"),
+    GOMODCACHE: path.join(cache, "go-mod"),
+    npm_config_cache: path.join(cache, "npm"),
+    PIP_CACHE_DIR: path.join(cache, "pip"),
+    XDG_CACHE_HOME: path.join(cache, "xdg"),
+    GRADLE_USER_HOME: path.join(cache, "gradle"),
+  };
 }
 
 export async function execute(p: PreparedReview, opts: ReviewOptions): Promise<ReviewOutcome> {
@@ -490,8 +548,11 @@ export async function execute(p: PreparedReview, opts: ReviewOptions): Promise<R
       }),
     };
   }
+  const programPath = p.programPath;
 
   const workspaceDir = composeWorkspace(p.pins, p.changeId);
+  const cacheEnvironment = reviewCacheEnvironment(workspaceDir);
+  for (const directory of Object.values(cacheEnvironment)) fs.mkdirSync(directory, { recursive: true });
   const primaryManifest = p.perRepo.find((r) => r.config)?.config?.manifest;
   const orc = new Orc({ cwd: workspaceDir, defaultHarness: primaryManifest?.run.defaultHarness });
 
@@ -502,16 +563,29 @@ export async function execute(p: PreparedReview, opts: ReviewOptions): Promise<R
   }
 
   progress("launching review run");
-  const run = await orc.launch({
-    programPath: p.programPath,
-    cwd: workspaceDir,
-    brief: reviewBrief(p, opts.context),
-    ...REVIEW_RUN_POLICY,
-    sandboxDirs: p.pins.map((pin) => pin.root),
-    maxParallel: primaryManifest?.run.maxParallel,
-    budget: opts.budgetUsd ?? primaryManifest?.run.budgetUsd,
-    name: `review-${p.facts.repository.slice(0, 40)}-${p.changeId.slice(0, 12)}`,
-  });
+  const previousEnvironment = Object.fromEntries(
+    Object.keys(cacheEnvironment).map((name) => [name, process.env[name]]),
+  );
+  Object.assign(process.env, cacheEnvironment);
+  const run = await (async () => {
+    try {
+      return await orc.launch({
+        programPath,
+        cwd: workspaceDir,
+        brief: reviewBrief(p, opts.context),
+        ...REVIEW_RUN_POLICY,
+        sandboxDirs: p.pins.map((pin) => pin.root),
+        maxParallel: primaryManifest?.run.maxParallel,
+        budget: opts.budgetUsd ?? primaryManifest?.run.budgetUsd,
+        name: `review-${p.facts.repository.slice(0, 40)}-${p.changeId.slice(0, 12)}`,
+      });
+    } finally {
+      for (const [name, value] of Object.entries(previousEnvironment)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  })();
   progress(`monitor: ${run.info.monitorUrl}`);
 
   let status = await run.status();
@@ -522,7 +596,7 @@ export async function execute(p: PreparedReview, opts: ReviewOptions): Promise<R
   let result = null;
   if (status.state === "completed") {
     try {
-      result = parseProgramResult(await run.result());
+      result = normalizeFindingPaths(parseProgramResult(await run.result()), p.pins);
     } catch {
       result = null; // fail closed
     }
@@ -550,7 +624,7 @@ export async function execute(p: PreparedReview, opts: ReviewOptions): Promise<R
     consolidated: result?.consolidated ?? null,
     reviewerNames: p.eligible.map((r) => r.displayName),
     reviewerChange: p.reviewerChange,
-    changedPaths: p.facts.changedPaths,
+    changedPaths: p.pins.length === 1 ? p.pins[0].changedPaths : p.facts.changedPaths,
     uncoveredRepos: p.uncovered,
     runDetails: [
       ["run", run.runId],
