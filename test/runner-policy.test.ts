@@ -12,12 +12,13 @@ describe("review execution policy", () => {
       approvalMode: "auto",
       allowWrites: true,
       sandbox: true,
-      networkAccess: true,
+      networkAccess: false,
     });
     expect(reviewBrief(prepared, '{"pr":123,"checks":"passing"}')).toContain(
-      "run tests, and create build, cache, or temporary files inside the allowed workspace",
+      "run tests and create build, cache, or temporary files inside the allowed workspace",
     );
-    expect(reviewBrief(prepared)).toContain("use the internet and external documentation/tools");
+    expect(reviewBrief(prepared)).toContain("Outbound network access is disabled");
+    expect(reviewBrief(prepared, undefined, true)).toContain("use the internet and external documentation/tools");
     expect(reviewBrief(prepared, '{"pr":123,"checks":"passing"}')).toContain(
       "Return the requested structured result directly to the orchestrator",
     );

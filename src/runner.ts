@@ -64,6 +64,8 @@ export interface ReviewOptions {
   registryDir?: string;
   /** Trusted coordinator-supplied metadata/evidence; PR-authored fields inside remain untrusted. */
   context?: string;
+  /** Permit reviewer leaves outbound network while retaining the filesystem sandbox. */
+  networkAccess?: boolean;
   /** Stop after selection/classification (no program generation). */
   planOnly?: boolean;
   onProgress?: (message: string) => void;
@@ -73,7 +75,7 @@ export const REVIEW_RUN_POLICY = {
   approvalMode: "auto",
   allowWrites: true,
   sandbox: true,
-  networkAccess: true,
+  networkAccess: false,
 } as const;
 // tradeoff: concurrent leaves share one disposable worktree; this supports
 // ordinary test/build artifacts, but tests that rewrite tracked sources can
@@ -444,7 +446,7 @@ export async function prepare(opts: ReviewOptions): Promise<PreparedReview> {
   };
 }
 
-export function reviewBrief(p: PreparedReview, context?: string): string {
+export function reviewBrief(p: PreparedReview, context?: string, networkAccess = false): string {
   const repoLines = p.pins
     .map((pin) => `- ${pin.id}/: ${pin.diffBriefing}`)
     .join("\n");
@@ -456,7 +458,7 @@ Your working directory mounts each repo by id:
 ${repoLines}
 Review ONLY those changes; the working trees are their authoritative state. Run the git commands above INSIDE the repo's directory. Read surrounding files as needed.
 Reference every file in findings as <repoId>/<path> (e.g. ${p.pins[0].id}/src/main.ts).
-The repositories are disposable review worktrees. You may use the internet and external documentation/tools, run tests, and create build, cache, or temporary files inside the allowed workspace, but do not alter tracked source files, commit, push, publish, or change anything outside it.
+The repositories are disposable review worktrees. ${networkAccess ? "You may use the internet and external documentation/tools." : "Outbound network access is disabled; use the repositories and supplied coordinator context."} You may run tests and create build, cache, or temporary files inside the allowed workspace, but do not alter tracked source files, commit, push, publish, or change anything outside it.
 Return the requested structured result directly to the orchestrator. Source-reviewer instructions about \`$REPO_DIR\`, \`$FINDINGS_OUTPUT_PATH\`, writing a findings file, or independently fetching GitHub metadata describe their original transport and are replaced by this contract. Do not invoke GitHub; use the coordinator context below when present.
 ${suppliedContext}Report genuine findings only — do not pad; an empty findings list is a valid result.`;
 }
@@ -555,9 +557,10 @@ export async function execute(p: PreparedReview, opts: ReviewOptions): Promise<R
   for (const directory of Object.values(cacheEnvironment)) fs.mkdirSync(directory, { recursive: true });
   const primaryManifest = p.perRepo.find((r) => r.config)?.config?.manifest;
   const orc = new Orc({ cwd: workspaceDir, defaultHarness: primaryManifest?.run.defaultHarness });
+  const runPolicy = { ...REVIEW_RUN_POLICY, networkAccess: opts.networkAccess ?? false };
 
   progress("validating plan against live harness capabilities");
-  const validation = await orc.validate({ programPath: p.programPath, ...REVIEW_RUN_POLICY });
+  const validation = await orc.validate({ programPath: p.programPath, ...runPolicy });
   if (validation.problems.length > 0) {
     throw new Error(`orc rejected the plan:\n  ${validation.problems.join("\n  ")}`);
   }
@@ -572,8 +575,8 @@ export async function execute(p: PreparedReview, opts: ReviewOptions): Promise<R
       return await orc.launch({
         programPath,
         cwd: workspaceDir,
-        brief: reviewBrief(p, opts.context),
-        ...REVIEW_RUN_POLICY,
+        brief: reviewBrief(p, opts.context, opts.networkAccess),
+        ...runPolicy,
         sandboxDirs: p.pins.map((pin) => pin.root),
         maxParallel: primaryManifest?.run.maxParallel,
         budget: opts.budgetUsd ?? primaryManifest?.run.budgetUsd,

@@ -159,13 +159,15 @@ program
   .option("--with <bot...>", "call local-registry bots onto the run (always advisory)")
   .option("--registry <dir>", "registry directory override")
   .option("--allow-uncovered", "skip repos without .orc-review (noted as omissions)", false)
+  .option("--network", "permit reviewer leaves outbound network inside the filesystem sandbox", false)
   .option("--open", "open the live monitor in the browser", false)
   .option("--json", "machine-readable output", false)
-  .action(async (local: CommonLocal & { budget?: string; open?: boolean }, cmd: Command) => {
+  .action(async (local: CommonLocal & { budget?: string; network?: boolean; open?: boolean }, cmd: Command) => {
     try {
       const opts: ReviewOptions = {
         ...reviewOptions(cmd, local),
         budgetUsd: local.budget ? Number(local.budget) : undefined,
+        networkAccess: local.network,
         onProgress: (m) => {
           console.error(m);
           if (local.open && m.startsWith("monitor: ")) {
