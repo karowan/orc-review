@@ -1,3 +1,9 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>orc-review · canonical design</title>
 <style>
   :root {
@@ -134,10 +140,12 @@
   .footnote { color: var(--ink-faint); font-size: 0.85rem; margin-top: 40px; border-top: 1px solid var(--line); padding-top: 14px; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
+</head>
+<body>
 
 <main>
 <header>
-  <div class="eyebrow">orc-review · canonical design · v0.3 · 2026-07-20</div>
+  <div class="eyebrow">orc-review · canonical design · v0.4 · 2026-07-22</div>
   <h1>orc-review: model-planned code review workflows on the orc runtime</h1>
   <p class="meta">
     The complete engine design as implemented. orc-review owns exactly three things —
@@ -151,6 +159,7 @@
     <li><a href="#config">Configuration &amp; reviewer authoring</a></li>
     <li><a href="#registry">The local bot registry</a></li>
     <li><a href="#selection">Selection &amp; eligibility</a></li>
+    <li><a href="#governance">Governor &amp; corroborator routing</a></li>
     <li><a href="#planning">Planning: the flat lane layer</a></li>
     <li><a href="#verification">Verification</a></li>
     <li><a href="#execution">Execution on orc</a></li>
@@ -311,12 +320,17 @@ run:
   aggregator_model: gpt-5.6-sol       # defaults shown; harness/effort too
   aggregator_harness: codex
 planner:
-  model: claude-fable-5        # or disabled: true → template only</code></pre>
+  harness: codex
+  model: gpt-5.6-sol
+  effort: medium
+  max_calls: 6
+  required: true               # no unoptimized fallback may exceed max_calls
+  # disabled: true             # alternative: deterministic template only</code></pre>
 
 <p>Simple reviewer — one markdown file:</p>
 <pre><code>---
 model: claude-sonnet-5
-can_block: true            # authority bits live here and in the manifest — never elsewhere
+can_block: true            # reviewer authority metadata; evidence remains separate from publication
 ---
 You are the security reviewer. Hunt for injection, authz, and secret-handling defects.</code></pre>
 
@@ -345,8 +359,10 @@ aggregation_notes: prompts/adjudicate.md   # injected into the aggregator, attri
   called onto any run with <code>--with &lt;name&gt;</code>. Registry bots are <strong>advisory by
   construction</strong>: <code>required</code>/<code>can_block</code> only ever come from a
   reviewed repo's own manifest, so local bots are forced to
-  <code>required: false, can_block: false</code> regardless of what their files claim — the
-  deterministic severity cap (§10) enforces it downstream. They are labeled "(local)" in
+  <code>required: false, can_block: false</code> regardless of what their files claim. This does
+  not rewrite their evidence: a local bot's blocking finding remains blocking and the engine still
+  computes the full dry-run conclusion. A publisher independently limits the side effects it is
+  allowed to perform. Local bots are labeled "(local)" in
   attribution and provenance, excluded from Reviewer-Change classification, and cannot shadow a
   repo-defined reviewer id. <code>orc-review bots</code> lists the registry. A repo that wants a
   personal bot as a merge gate defines it in its own <code>.orc-review</code> like any reviewer.
@@ -374,7 +390,63 @@ aggregation_notes: prompts/adjudicate.md   # injected into the aggregator, attri
       run's verdict at ADVISORY.</li>
 </ul>
 
-<h2 id="planning">6 · Planning: the flat lane layer <span class="stage-label craft-tag">craft</span></h2>
+<h2 id="governance">6 · Governor &amp; corroborator routing <span class="stage-label law-tag">law</span></h2>
+
+<p>
+  A repository can express area ownership today without a new engine concept: each path rule adds
+  the reviewer who presides over that area plus the corroborating reviewers appropriate to it, and
+  <code>selection.always</code> supplies the general fallback governor. The terms
+  <em>governor</em> and <em>corroborator</em> are a manifest-authoring convention in v0.4, not
+  authority inferred by a model. Selection remains deterministic and visible in plan output.
+</p>
+
+<pre><code># A concrete repository-owned council
+version: 1
+reviewers:
+  - { id: karowan,  source: reviewers/karowan.md, required: true }
+  - { id: abhinav,  source: reviewers/abhinav,    required: true }
+  - { id: devpatel, source: reviewers/devpatel,   required: false }
+  - { id: aaron,    source: reviewers/aaron,      required: false }
+
+selection:
+  always: [karowan]                 # general governor / fallback
+  rules:
+    - id: backend-infrastructure
+      when:
+        any_changed_path:
+          - "apps/noor-service/**"
+          - "infrastructure/**"
+          - ".github/workflows/**"
+      add: [abhinav, devpatel]       # area governor + corroborator
+    - id: product-experience
+      when:
+        any_changed_path:
+          - "agents/**"
+          - "agents-harness/**"
+          - "apps/pr-dashboard/**"
+          - "packages/design-tokens/**"
+      add: [aaron, devpatel]         # area governor + corroborator</code></pre>
+
+<p>
+  This gives every change at least the fallback governor; matching areas accumulate their own
+  governor and peers. A change spanning backend and product receives the union, never one branch
+  chosen at the expense of another. <code>required</code> is deliberately separate from selection:
+  it means a selected bot must retain at least one successful lane for the run to be complete. It
+  does not make that bot run when no rule selected it.
+</p>
+
+<div class="invariant"><p><strong>Models never choose review authority.</strong> Repository rules choose the cohort from changed paths. The planner may combine selected work, but cannot add, remove, or replace a governor.</p></div>
+
+<h3>Current boundary</h3>
+<p>
+  The schema does not yet have <code>role</code>, <code>areas</code>,
+  <code>minimum_governors</code>, or <code>corroborators</code> fields, and therefore cannot prove
+  that an arbitrary manifest follows this convention. That is acceptable for the first repository:
+  its small, explicit rule table is the policy and is validated like any other config. A reusable
+  pack extension belongs in §15 only after multiple repositories need the same routing taxonomy.
+</p>
+
+<h2 id="planning">7 · Planning: the flat lane layer <span class="stage-label craft-tag">craft</span></h2>
 
 <p>
   A planner model (default <code>claude-fable-5</code> via the <code>claude</code> CLI, pluggable)
@@ -398,13 +470,25 @@ aggregation_notes: prompts/adjudicate.md   # injected into the aggregator, attri
 <p>
   Judgment text is verbatim <em>by construction</em>: prompt bodies are injected into the program
   header as <code>PROMPTS</code> constants and the planner only ever references them — it never
-  holds the text. Rejected programs retry once with verifier feedback; the final fallback is a
-  deterministic <strong>template generator</strong> (every lane independent, no merges, no
-  merges) that passes verification by construction. The program returns
+  holds the text. Rejected programs retry once with verifier feedback. If the manifest sets
+  <code>planner.required: true</code>, two rejected/failed attempts abort the review; otherwise the
+  final fallback is a deterministic <strong>template generator</strong> (every lane independent,
+  no merging) that passes verification by construction. A configured
+  <code>planner.max_calls</code> is a hard judgment-call ceiling and therefore requires the planner
+  to be required: an unoptimized fallback is not allowed to evade the budget. The program returns
   <code>{ consolidated, laneOutcomes }</code>.
 </p>
 
-<h2 id="verification">7 · Verification <span class="stage-label law-tag">law</span></h2>
+<h3>Saved plans</h3>
+<p>
+  <code>plan --program --json</code> emits a reusable plan artifact. A later
+  <code>run --plan-file</code> does not plan again: it re-resolves the change and reviewer files,
+  binds the artifact to the exact change, cohort, models, aggregator policy, call ceiling, source,
+  and digest, then runs that verified program or rejects it as stale. This is the seam used by a
+  coordinator that wants planning and long-running execution in separate durable steps.
+</p>
+
+<h2 id="verification">8 · Verification <span class="stage-label law-tag">law</span></h2>
 
 <p>The planner proposes; a TypeScript-AST verifier disposes. Checked structurally on the assembled program:</p>
 <div class="table-wrap"><table>
@@ -424,7 +508,7 @@ aggregation_notes: prompts/adjudicate.md   # injected into the aggregator, attri
   prove; the structural rules still prevent direct cross-lane prompt references.
 </p>
 
-<h2 id="execution">8 · Execution on orc</h2>
+<h2 id="execution">9 · Execution on orc</h2>
 
 <p>
   One orc run per attempt: the pinned program bundle (sha256 recorded) <em>is</em> the review spec,
@@ -432,15 +516,21 @@ aggregation_notes: prompts/adjudicate.md   # injected into the aggregator, attri
   (<code>review</code> / <code>aggregate</code>), per-lane rows with
   harness · model · cost · duration, a self-contained <code>report.html</code>. Launch parameters:
   cwd = the composed workspace, <code>approvalMode: auto</code>, <code>allowWrites: true</code>,
-  sandboxed to the pinned roots. Reviewer leaves may create test/build artifacts but are briefed
-  not to alter tracked source or cause external side effects; the aggregator stays read-only.
-  Budget/maxParallel come from the primary manifest or flags. The
+  sandboxed to the pinned roots. <strong>Outbound network access is off by default</strong> and can
+  be enabled explicitly with <code>run --network</code> (or library option
+  <code>networkAccess: true</code>) without removing filesystem confinement. Reviewer leaves may
+  create test/build/cache/temp artifacts but are briefed not to alter tracked source, commit, push,
+  publish, or change anything outside the workspace; the aggregator stays read-only. Common tool
+  caches are redirected under the composed workspace. Budget/maxParallel come from the primary
+  manifest or flags. The
   brief injected into every leaf enumerates each repo's pinned diff instructions and the
-  path-addressing convention. Lane failures settle as envelopes; one failing lane never sinks the
-  run. Fail-forward resume and replay come from orc.
+  path-addressing convention. A bounded <code>--context-file</code> lets a trusted coordinator
+  supply remote checks and metadata once to all lanes without giving them publication credentials.
+  Lane failures settle as envelopes; one failing lane never sinks the run. Fail-forward resume and
+  replay come from orc.
 </p>
 
-<h2 id="aggregation">9 · The aggregator <span class="stage-label craft-tag">craft</span></h2>
+<h2 id="aggregation">10 · The aggregator <span class="stage-label craft-tag">craft</span></h2>
 
 <p>
   The single depth-1 consolidation stage — the only place findings merge. Default model:
@@ -461,11 +551,14 @@ aggregation_notes: prompts/adjudicate.md   # injected into the aggregator, attri
   <li>Failure honesty: every errored lane becomes an omission; only if <em>every</em> lane errored
       is readiness forced to <code>unknown</code> — otherwise it judges from the lanes that
       succeeded.</li>
+  <li>Omission taxonomy is closed: <code>lane_failure</code>, <code>test_not_run</code>,
+      <code>external_context</code>, and <code>evidence_gap</code>. Native causes survive; an
+      inapplicable surface is not an omission.</li>
   <li>Bot voice: a bot's <code>aggregation_notes</code> govern findings sourced only from its lanes
       and weigh in cross-bot merges.</li>
 </ul>
 
-<h2 id="verdict">10 · Verdict, completeness, rendering <span class="stage-label law-tag">law</span></h2>
+<h2 id="verdict">11 · Verdict, completeness, rendering <span class="stage-label law-tag">law</span></h2>
 
 <p>
   The aggregator's output is <em>evidence, not authority</em> — a deterministic pass decides what
@@ -493,7 +586,10 @@ aggregation_notes: prompts/adjudicate.md   # injected into the aggregator, attri
   findings sorted by severity rank with
   <code>MUST FIX / SHOULD FIX / CONSIDER / NIT</code> counts, per-finding why/fix/attribution,
   omissions, and a collapsible run-details block. Inline-comment anchors are computed for findings
-  on changed files (for a future publisher) but every finding also stays in the body. A clean
+  on changed files (for a future publisher) but every finding also stays in the body. Before
+  rendering, finding paths are normalized at the trusted engine boundary: disposable repo prefixes
+  and absolute in-repo paths become stable repository paths; locations outside registered roots
+  lose their anchor rather than pointing somewhere misleading. A clean
   approval says exactly "No findings survived scrutiny." — never padded.
 </p>
 <h3>Provenance (run details)</h3>
@@ -504,17 +600,23 @@ aggregation_notes: prompts/adjudicate.md   # injected into the aggregator, attri
   which plan" is always answerable from the output alone.
 </p>
 
-<h2 id="surfaces">11 · CLI &amp; library surfaces</h2>
+<h2 id="surfaces">12 · CLI &amp; library surfaces</h2>
 
 <pre><code>orc-review validate                    # working-tree config check
 orc-review plan [--repo …]             # per-repo cohort, reasons, lanes — instant, no model
-orc-review plan --program              # …plus the planner-authored program (verifier-gated)
-orc-review run  [--repo …] [--with bot] [--budget N] [--allow-uncovered] [--open] [--json]
+orc-review plan --program --json       # …plus a durable verifier-gated plan artifact
+orc-review run  [--repo …] [--plan-file plan.json] [--with bot] [--budget N]
+                [--network] [--allow-uncovered] [--open] [--json]
 orc-review bots                        # list the local registry
-# global: --dir/--base (single-repo sugar) · --repo [id=][scheme:]spec[@base] (repeatable)</code></pre>
+# global: --dir/--base (single-repo sugar) · --context-file evidence.json
+#         --repo [id=][scheme:]spec[@base] (repeatable)</code></pre>
 
 <pre><code>import { prepare, execute, review } from "orc-review";
-const outcome = await review({ repos: ["app=.", "lib=../lib@origin/main"] });
+const outcome = await review({
+  repos: ["app=.", "lib=../lib@origin/main"],
+  networkAccess: false, // default; true retains the filesystem sandbox
+  context: trustedCoordinatorEvidence,
+});
 outcome.evaluation.verdict;      // "APPROVED" | …
 outcome.rendered.body;           // Consolidated Review markdown
 outcome.rendered.inlineComments; // anchored findings for a future publisher
@@ -524,17 +626,18 @@ outcome.monitorUrl;              // live monitor</code></pre>
   program) with no launch — the seam a service layer builds on. <code>--json</code> everywhere.
 </p>
 
-<h2 id="invariants">12 · Invariants</h2>
+<h2 id="invariants">13 · Invariants</h2>
 
 <div class="invariant"><p><strong>A Reviewer Change is never approved by automation.</strong> Advisory at best; a PR cannot nominate or alter its own reviewers (config trusted only from base trees).</p></div>
 <div class="invariant"><p><strong>Selection is deterministic.</strong> The planner chooses how reviewers run, never whether. Byte-identical cohorts for identical inputs.</p></div>
+<div class="invariant"><p><strong>Network is explicit.</strong> Filesystem confinement is always retained; outbound access is disabled unless the caller opts in for reviews that need external documentation or tool verification.</p></div>
 <div class="invariant"><p><strong>Judgment is verbatim.</strong> Prompt text is injected, never model-rewritten; merging is concatenation with union attribution; there is no support tier — every call is a judgment lane or the aggregator.</p></div>
 <div class="invariant"><p><strong>Depth is exactly 1.</strong> Lanes produce findings; one aggregator merges them; nothing else merges judgment. Reviewers never see each other's output.</p></div>
 <div class="invariant"><p><strong>Evidence is not authority.</strong> Reviewers retain their finding severities and full verdict conclusions. Publication authority is enforced separately by the service layer; registry bots remain non-required and cannot grant that authority to themselves.</p></div>
 <div class="invariant"><p><strong>Fail closed, degrade honestly.</strong> Malformed results, failed required bots, uncovered repos, unknown readiness → never approve. Partial lane failures degrade coverage and say so.</p></div>
 <div class="invariant"><p><strong>Everything reviews sandboxed pinned state.</strong> SHAs not branch names; dirty state fingerprinted into the attempt identity; reviewer writes are limited to local test/build artifacts and never grant publication authority.</p></div>
 
-<h2 id="decisions">13 · Decision log</h2>
+<h2 id="decisions">14 · Decision log</h2>
 
 <div class="table-wrap"><table>
   <tr><th>Decision</th><th>Over</th><th>Why</th></tr>
@@ -545,12 +648,14 @@ outcome.monitorUrl;              // live monitor</code></pre>
   <tr><td>Bot ok iff ≥1 lane ok; total wipeout → PARTIAL</td><td>All-lanes-ok</td><td>One flaky lane shouldn't fail a review; zero surviving judgment must</td></tr>
   <tr><td>Aggregator defaults to gpt-5.6-sol (codex)</td><td>Inheriting a lane default</td><td>Highest-leverage single lane in the run; explicitly chosen, overridable per repo</td></tr>
   <tr><td>Repo definitions + local registry</td><td>Catalogs, vendor+lock+sync, config layers</td><td>Repos keep authority with zero new infrastructure; personal bots live once and ride along advisory</td></tr>
+  <tr><td>Explicit path rules encode governors and corroborators</td><td>Model-selected authority, premature pack schema</td><td>The repository can audit exactly who reviews each area today; the planner cannot mutate authority</td></tr>
   <tr><td>Repo sets (N ≥ 1), caller-named, source-resolved</td><td>Single/multi-repo modes, structural workspace discovery</td><td>No modal code paths; migration reviews are first-class; custom fetchers plug in at exactly one seam</td></tr>
   <tr><td>No support tier — every call is a lane or the aggregator</td><td>Planner-hoisted "preflight" stages</td><td>A test lane is just another lane; merging already deduplicates shared work, and the program shape stays two-stage flat</td></tr>
   <tr><td>Uncovered repos fail by default</td><td>Silent skip</td><td>Reviewing half a migration while looking whole is the worst outcome; opt-in skip renders as PARTIAL</td></tr>
+  <tr><td>Network off by default; <code>--network</code> opts in</td><td>Always-on network or removing the sandbox</td><td>External verification remains possible without granting every local run ambient access</td></tr>
 </table></div>
 
-<h2 id="deferred">14 · Deferred: the service layer</h2>
+<h2 id="deferred">15 · Deferred extensions and service layer</h2>
 <p>
   Explicitly out of engine scope, designed to compose around <code>prepare()/execute()</code> and
   the rendered output: GitHub publication (action hints and inline anchors are already computed),
@@ -559,8 +664,32 @@ outcome.monitorUrl;              // live monitor</code></pre>
   <code>STALE — NOT APPROVED</code> reserved), reviewer affinity, and repo enrollment.
 </p>
 
+<h3>Reusable governance packs — deferred</h3>
+<p>
+  If several repositories need the same area taxonomy, a future closed-schema extension may add
+  reviewer roles/areas and minimum cohort constraints. Its purpose would be validation and reuse,
+  not model routing. A possible shape is shown only to preserve the design direction; it is
+  <strong>not accepted by v0.4</strong>:
+</p>
+<pre><code># FUTURE / NON-IMPLEMENTED
+reviewers:
+  - id: abhinav
+    source: reviewers/abhinav
+    role: governor
+    areas: [backend, infrastructure, security]
+selection:
+  minimum_governors: 1
+  corroborators: 2</code></pre>
+<p>
+  Any such extension must compile to the same deterministic selected cohort before planning. It
+  must not allow a planner or PR-authored change to grant authority, and it should not be built
+  until explicit rules become duplicated enough to justify it.
+</p>
+
 <p class="footnote">
-  orc-review · canonical design v0.3 · engine at <code>~/coding/orc-review</code> · runtime at
-  <code>~/coding/orc</code>. Revision history lives in the decision log (§13).
+  orc-review · canonical design v0.4 · engine at <code>~/coding/orc-review</code> · runtime at
+  <code>~/coding/orc</code>. Revision history lives in the decision log (§14).
 </p>
 </main>
+</body>
+</html>
