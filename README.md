@@ -66,7 +66,7 @@ verify (deterministic) → one orc run → verdict + render (deterministic)
   verdict is capped at ADVISORY. Automation never approves changes to review
   authority.
 - **Plan** — a planner model (default `claude-fable-5` via the `claude` CLI;
-  `planner.harness: codex` uses subscription-authenticated Codex)
+  `planner.harness: codex` uses the locally configured Codex provider and auth)
   authors the literal orc program as a **flat lane layer**: the union of every
   eligible bot's lanes, concurrent, depth 1. Its craft is **packing compatible
   lanes within or across bots** into fewer executions (verbatim texts
