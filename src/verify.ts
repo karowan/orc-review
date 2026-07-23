@@ -17,7 +17,14 @@
  * still prevent cross-lane prompt references.)
  */
 import ts from "typescript";
-import { flatLanes, type CompiledReviewer } from "./contracts.js";
+import {
+  flatLanes,
+  modelAllowed,
+  type AggregatorOptions,
+  type CompiledReviewer,
+  type ModelPolicy,
+  type ModelSelection,
+} from "./contracts.js";
 
 const RESERVED = new Set(["PROMPTS", "NOTES", "SCHEMAS", "CTX", "MERGE_PROMPT", "AGG"]);
 const FORBIDDEN_OPTS = new Set(["cwd", "host"]);
@@ -27,13 +34,18 @@ interface JudgmentCall {
   headed: boolean; // prompt begins with a PROMPTS ref
   schema: string | null;
   writable: boolean;
+  model: ModelSelection | null;
   where: string;
 }
 
 export function verifyProgram(
   source: string,
   reviewers: CompiledReviewer[],
-  limits: { maxJudgmentCalls?: number } = {},
+  limits: {
+    maxJudgmentCalls?: number;
+    modelPolicy?: ModelPolicy;
+    aggregator?: AggregatorOptions;
+  } = {},
 ): string[] {
   const problems: string[] = [];
   const sf = ts.createSourceFile("review.orc.ts", source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
@@ -44,7 +56,13 @@ export function verifyProgram(
 
   let hasDefaultExport = false;
   const judgmentCalls: JudgmentCall[] = [];
-  const consolidatedCalls: Array<{ mergeHeaded: boolean; promptsRefs: number; settled: boolean }> = [];
+  const consolidatedCalls: Array<{
+    mergeHeaded: boolean;
+    promptsRefs: number;
+    settled: boolean;
+    model: ModelSelection | null;
+    where: string;
+  }> = [];
   const seenDecl = new Map<string, number>();
 
   const stripParens = (e: ts.Expression): ts.Expression =>
@@ -102,6 +120,40 @@ export function verifyProgram(
         prop.initializer.kind === ts.SyntaxKind.FalseKeyword,
     );
 
+  const modelSelection = (obj: ts.ObjectLiteralExpression | undefined): ModelSelection | null => {
+    if (!obj) return null;
+    if (obj.properties.some(ts.isSpreadAssignment)) return null;
+    const count = (name: string) =>
+      obj.properties.filter(
+        (prop) => ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name) && prop.name.text === name,
+      ).length;
+    const value = (name: string): string | undefined => {
+      const props = obj.properties.filter(
+        (prop): prop is ts.PropertyAssignment =>
+          ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name) && prop.name.text === name,
+      );
+      if (props.length !== 1) return undefined;
+      const expr = stripParens(props[0].initializer);
+      if (ts.isStringLiteralLike(expr)) return expr.text;
+      if (
+        limits.aggregator &&
+        ts.isPropertyAccessExpression(expr) &&
+        ts.isIdentifier(expr.expression) &&
+        expr.expression.text === "AGG"
+      ) {
+        if (expr.name.text === "harness") return limits.aggregator.harness;
+        if (expr.name.text === "model") return limits.aggregator.model;
+        if (expr.name.text === "reasoningEffort") return limits.aggregator.reasoningEffort;
+      }
+      return undefined;
+    };
+    const harness = value("harness");
+    const model = value("model");
+    const reasoningEffort = value("reasoningEffort");
+    if (count("reasoningEffort") > 0 && reasoningEffort === undefined) return null;
+    return harness && model ? { harness, model, reasoningEffort } : null;
+  };
+
   const callName = (node: ts.CallExpression): string => {
     const callee = stripParens(node.expression);
     return ts.isIdentifier(callee)
@@ -127,13 +179,27 @@ export function verifyProgram(
     const refs: string[] = [];
     collectRefs(promptExpr, refs);
     const schema = schemaRef(opts);
+    const model = modelSelection(opts);
     if (refs.length > 0) {
-      judgmentCalls.push({ keys: refs, headed: promptsHeaded(promptExpr), schema, writable: isWritable(opts), where });
+      judgmentCalls.push({
+        keys: refs,
+        headed: promptsHeaded(promptExpr),
+        schema,
+        writable: isWritable(opts),
+        model,
+        where,
+      });
       if (mergeHeaded(promptExpr)) {
         problems.push(`${where}: a judgment prompt must not also start from MERGE_PROMPT`);
       }
     } else if (schema === "SCHEMAS.consolidated" || mergeHeaded(promptExpr)) {
-      consolidatedCalls.push({ mergeHeaded: mergeHeaded(promptExpr), promptsRefs: refs.length, settled });
+      consolidatedCalls.push({
+        mergeHeaded: mergeHeaded(promptExpr),
+        promptsRefs: refs.length,
+        settled,
+        model,
+        where,
+      });
       if (schema !== "SCHEMAS.consolidated") {
         problems.push(`${where}: the aggregator call must carry schema: SCHEMAS.consolidated`);
       }
@@ -220,6 +286,17 @@ export function verifyProgram(
     if (!call.writable) {
       problems.push(`${call.where} carrying judgment (keys ${call.keys.join(", ")}) must set readOnly: false`);
     }
+    if (limits.modelPolicy) {
+      if (!call.model) {
+        problems.push(
+          `${call.where} carrying judgment (keys ${call.keys.join(", ")}) must use one statically verifiable harness/model/effort tuple under model_policy`,
+        );
+      } else if (!modelAllowed(limits.modelPolicy, call.model)) {
+        problems.push(
+          `${call.where} carrying judgment (keys ${call.keys.join(", ")}) uses ${[call.model.harness, call.model.model, call.model.reasoningEffort].filter(Boolean).join("/")}, which model_policy.allowed does not permit`,
+        );
+      }
+    }
     for (const key of call.keys) {
       if (key === "<dynamic>") {
         problems.push(`${call.where} uses a dynamic PROMPTS access — keys must be string literals`);
@@ -257,6 +334,17 @@ export function verifyProgram(
     problems.push("the aggregator prompt must start with MERGE_PROMPT");
   } else if (consolidatedCalls[0].settled) {
     problems.push("the aggregator must return its consolidated value directly and cannot be wrapped in settle()");
+  } else if (limits.modelPolicy && !consolidatedCalls[0].model) {
+    problems.push("the aggregator must use one statically verifiable harness/model/effort tuple under model_policy");
+  } else if (
+    limits.modelPolicy &&
+    consolidatedCalls[0].model &&
+    !modelAllowed(limits.modelPolicy, consolidatedCalls[0].model)
+  ) {
+    const model = consolidatedCalls[0].model;
+    problems.push(
+      `the aggregator uses ${[model.harness, model.model, model.reasoningEffort].filter(Boolean).join("/")}, which model_policy.allowed does not permit`,
+    );
   }
 
   return problems;

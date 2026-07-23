@@ -203,6 +203,8 @@ function reusePreparedPlan(
   value: unknown,
   contractSha256: string,
   maxJudgmentCalls: number | undefined,
+  modelPolicy: Manifest["modelPolicy"],
+  aggregator: AggregatorOptions,
 ): PreparedReview {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new ConfigError(["--plan-file must contain `orc-review plan --program --json` output"]);
@@ -229,7 +231,11 @@ function reusePreparedPlan(
       "--plan-file program does not match its body and the current injected prompts, facts, or aggregator policy",
     ]);
   }
-  const problems = verifyProgram(saved.programSource, base.eligible, { maxJudgmentCalls });
+  const problems = verifyProgram(saved.programSource, base.eligible, {
+    maxJudgmentCalls,
+    modelPolicy,
+    aggregator,
+  });
   if (problems.length > 0) {
     throw new ConfigError(["--plan-file program no longer verifies", ...problems]);
   }
@@ -357,9 +363,18 @@ export async function prepare(opts: ReviewOptions): Promise<PreparedReview> {
     aggregator: aggregatorOptions(primaryManifest),
   };
   const maxJudgmentCalls = primaryManifest?.planner?.maxCalls;
+  const modelPolicy = primaryManifest?.modelPolicy;
   const contractSha256 = planContractSha256(base, primaryManifest, assembly.aggregator, maxJudgmentCalls);
   if (opts.preparedPlan !== undefined) {
-    return reusePreparedPlan(base, assembly, opts.preparedPlan, contractSha256, maxJudgmentCalls);
+    return reusePreparedPlan(
+      base,
+      assembly,
+      opts.preparedPlan,
+      contractSha256,
+      maxJudgmentCalls,
+      modelPolicy,
+      assembly.aggregator,
+    );
   }
 
   const rejectedPlans: string[][] = [];
@@ -394,12 +409,15 @@ export async function prepare(opts: ReviewOptions): Promise<PreparedReview> {
             feedback,
             priorBody,
             maxCalls: maxJudgmentCalls,
+            modelPolicy,
           }),
         );
         const body = extractProgramBody(raw);
         const candidate = assemble(assembly, body);
         const problems = verifyProgram(candidate, eligible, {
           maxJudgmentCalls,
+          modelPolicy,
+          aggregator: assembly.aggregator,
         });
         if (problems.length === 0) {
           programBody = body;
@@ -426,7 +444,11 @@ export async function prepare(opts: ReviewOptions): Promise<PreparedReview> {
     progress(planModel ? "planner rejected; falling back to the template plan" : "using the template plan");
     programBody = templateProgram(eligible);
     source = assemble(assembly, programBody);
-    const problems = verifyProgram(source, eligible);
+    const problems = verifyProgram(source, eligible, {
+      maxJudgmentCalls,
+      modelPolicy,
+      aggregator: assembly.aggregator,
+    });
     if (problems.length > 0) {
       throw new Error(`template plan failed verification (bug):\n  ${problems.join("\n  ")}`);
     }

@@ -35,6 +35,8 @@ export interface Manifest {
   version: number;
   reviewers: ManifestReviewerEntry[]; // declaration order is authoritative
   selection: { always: string[]; rules: SelectionRule[] };
+  /** Optional fail-closed allowlist for every model call made by a review. */
+  modelPolicy?: ModelPolicy;
   run: {
     budgetUsd?: number;
     maxParallel?: number;
@@ -52,6 +54,31 @@ export interface Manifest {
     required?: boolean;
     disabled?: boolean;
   };
+}
+
+export interface ModelSelection {
+  harness: string;
+  model: string;
+  reasoningEffort?: string;
+}
+
+export interface ModelPolicy {
+  allowed: ModelSelection[];
+  /** Planner-only metadata for an allowed selection; keys have repo-defined meaning. */
+  preferences?: ModelPreference[];
+}
+
+export interface ModelPreference extends ModelSelection {
+  metadata: Record<string, unknown>;
+}
+
+export function modelAllowed(policy: ModelPolicy, selection: ModelSelection): boolean {
+  return policy.allowed.some(
+    (allowed) =>
+      allowed.harness === selection.harness &&
+      allowed.model === selection.model &&
+      allowed.reasoningEffort === selection.reasoningEffort,
+  );
 }
 
 // --- compiled reviewers -----------------------------------------------------
@@ -109,6 +136,10 @@ export const DEFAULT_AGGREGATOR: AggregatorOptions = {
   model: "gpt-5.6-sol",
   reasoningEffort: "high",
 };
+
+export const DEFAULT_PLANNER_MODEL = "claude-fable-5";
+export const DEFAULT_CODEX_PLANNER_MODEL = "gpt-5.6-sol";
+export const DEFAULT_CODEX_PLANNER_EFFORT = "medium";
 
 export interface ReviewConfig {
   manifest: Manifest;

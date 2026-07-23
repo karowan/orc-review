@@ -9,9 +9,15 @@ import {
   CONFIG_ROOT,
   MANIFEST_MAX_BYTES,
   MANIFEST_PATH,
+  DEFAULT_AGGREGATOR,
+  DEFAULT_CODEX_PLANNER_EFFORT,
+  DEFAULT_CODEX_PLANNER_MODEL,
+  DEFAULT_PLANNER_MODEL,
+  modelAllowed,
   type CompiledLane,
   type CompiledReviewer,
   type Manifest,
+  type ModelSelection,
   type ReviewConfig,
   type Tree,
 } from "./contracts.js";
@@ -39,6 +45,20 @@ const RuleSchema = z
   })
   .strict();
 
+const ModelSelectionSchema = z
+  .object({
+    harness: z.string().min(1),
+    model: z.string().min(1),
+    effort: z.string().min(1).optional(),
+  })
+  .strict();
+
+const ModelPreferenceSchema = ModelSelectionSchema.extend({
+  metadata: z
+    .record(z.string(), z.unknown())
+    .refine((value) => Object.keys(value).length > 0, "preference metadata must not be empty"),
+}).strict();
+
 const ManifestSchema = z
   .object({
     version: z.number().int().positive(),
@@ -60,6 +80,13 @@ const ManifestSchema = z
       })
       .strict()
       .default({ always: [], rules: [] }),
+    model_policy: z
+      .object({
+        allowed: z.array(ModelSelectionSchema).nonempty(),
+        preferences: z.array(ModelPreferenceSchema).nonempty().optional(),
+      })
+      .strict()
+      .optional(),
     run: z
       .object({
         budget: z.number().positive().optional(),
@@ -324,6 +351,21 @@ export function loadConfig(tree: Tree): ReviewConfig {
         add: r.add,
       })),
     },
+    modelPolicy: m.model_policy
+      ? {
+          allowed: m.model_policy.allowed.map((entry) => ({
+            harness: entry.harness,
+            model: entry.model,
+            reasoningEffort: entry.effort,
+          })),
+          preferences: m.model_policy.preferences?.map((entry) => ({
+            harness: entry.harness,
+            model: entry.model,
+            reasoningEffort: entry.effort,
+            metadata: entry.metadata,
+          })),
+        }
+      : undefined,
     run: {
       budgetUsd: m.run.budget,
       maxParallel: m.run.max_parallel,
@@ -379,6 +421,53 @@ export function loadConfig(tree: Tree): ReviewConfig {
   for (const entry of manifest.reviewers) {
     const compiled = compileReviewer(tree, entry.id, `${CONFIG_ROOT}/${entry.source}`, entry.required, problems);
     if (compiled) reviewers.push(compiled);
+  }
+  if (problems.length > 0) throw new ConfigError(problems);
+
+  if (manifest.modelPolicy) {
+    const display = (selection: ModelSelection) =>
+      [
+        selection.harness || "<unset harness>",
+        selection.model || "<unset model>",
+        selection.reasoningEffort,
+      ]
+        .filter(Boolean)
+        .join("/");
+    const requireAllowed = (where: string, selection: ModelSelection) => {
+      if (!modelAllowed(manifest.modelPolicy!, selection)) {
+        problems.push(`${where} uses ${display(selection)}, which model_policy.allowed does not permit`);
+      }
+    };
+    for (const preference of manifest.modelPolicy.preferences ?? []) {
+      requireAllowed("model_policy.preferences", preference);
+    }
+    if (!manifest.planner.disabled) {
+      const plannerHarness = manifest.planner.harness ?? "claude";
+      requireAllowed("planner", {
+        harness: plannerHarness,
+        model:
+          manifest.planner.model ??
+          (plannerHarness === "codex" ? DEFAULT_CODEX_PLANNER_MODEL : DEFAULT_PLANNER_MODEL),
+        reasoningEffort:
+          plannerHarness === "codex"
+            ? (manifest.planner.effort ?? DEFAULT_CODEX_PLANNER_EFFORT)
+            : undefined,
+      });
+    }
+    requireAllowed("aggregator", {
+      harness: manifest.run.aggregatorHarness ?? DEFAULT_AGGREGATOR.harness,
+      model: manifest.run.aggregatorModel ?? DEFAULT_AGGREGATOR.model,
+      reasoningEffort: manifest.run.aggregatorEffort ?? DEFAULT_AGGREGATOR.reasoningEffort,
+    });
+    for (const reviewer of reviewers) {
+      for (const lane of reviewer.lanes) {
+        requireAllowed(`reviewer ${reviewer.id} lane ${lane.promptKey}`, {
+          harness: lane.harness ?? manifest.run.defaultHarness ?? "",
+          model: lane.model ?? "",
+          reasoningEffort: lane.reasoningEffort,
+        });
+      }
+    }
   }
   if (problems.length > 0) throw new ConfigError(problems);
 

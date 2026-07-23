@@ -28,6 +28,39 @@ describe("template plan (flat)", () => {
 });
 
 describe("verifyProgram (flat rules)", () => {
+  it("rejects physical reviewer calls outside the configured model policy", () => {
+    const policyReviewers = reviewers.map((reviewer) => ({
+      ...reviewer,
+      lanes: reviewer.lanes.map((lane) => ({
+        ...lane,
+        harness: "codex",
+        model: "gpt-5.6-sol",
+        reasoningEffort: "medium",
+      })),
+    }));
+    const policyAssembly = { ...assembly, reviewers: policyReviewers };
+    const allowedSource = assemble(policyAssembly, templateProgram(policyReviewers));
+    const limits = {
+      modelPolicy: {
+        allowed: [
+          { harness: "codex", model: "gpt-5.6-sol", reasoningEffort: "medium" },
+          AGG,
+        ],
+      },
+      aggregator: AGG,
+    };
+    expect(verifyProgram(allowedSource, policyReviewers, limits)).toEqual([]);
+
+    const source = allowedSource.replace(
+      'reasoningEffort: "medium"',
+      'reasoningEffort: "xhigh"',
+    );
+    const problems = verifyProgram(source, policyReviewers, limits);
+    expect(problems.join("\n")).toContain(
+      "uses codex/gpt-5.6-sol/xhigh, which model_policy.allowed does not permit",
+    );
+  });
+
   it("accepts the canonical flat program (lanes + aggregator, nothing else)", () => {
     const body = `// PLAN: no merges
 export default async ({ agent, parallel, phase, log }) => {

@@ -8,14 +8,19 @@
  */
 import { execFile } from "node:child_process";
 import os from "node:os";
-import type { CompiledReviewer, Facts } from "./contracts.js";
+import {
+  DEFAULT_CODEX_PLANNER_EFFORT,
+  DEFAULT_CODEX_PLANNER_MODEL,
+  DEFAULT_PLANNER_MODEL,
+  type CompiledReviewer,
+  type Facts,
+  type ModelPolicy,
+} from "./contracts.js";
+
+export { DEFAULT_CODEX_PLANNER_EFFORT, DEFAULT_CODEX_PLANNER_MODEL, DEFAULT_PLANNER_MODEL };
 
 /** Pluggable plan model: planner prompt in, program body (or fenced text) out. */
 export type PlanModel = (prompt: string) => Promise<string>;
-
-export const DEFAULT_PLANNER_MODEL = "claude-fable-5";
-export const DEFAULT_CODEX_PLANNER_MODEL = "gpt-5.6-sol";
-export const DEFAULT_CODEX_PLANNER_EFFORT = "medium";
 
 /** Runs the planner through the local `claude` CLI (user's own auth). */
 export function claudeCliPlanner(model: string = DEFAULT_PLANNER_MODEL): PlanModel {
@@ -87,8 +92,9 @@ export function plannerPrompt(args: {
   feedback?: string[]; // verifier problems from a prior attempt
   priorBody?: string;
   maxCalls?: number;
+  modelPolicy?: ModelPolicy;
 }): string {
-  const { reviewers, facts, matchedRules, feedback, priorBody, maxCalls } = args;
+  const { reviewers, facts, matchedRules, feedback, priorBody, maxCalls, modelPolicy } = args;
   const reviewerBlocks = reviewers
     .map((r) => {
       const lanes = r.lanes
@@ -120,7 +126,7 @@ THE SHAPE (depth 1 — a deterministic verifier rejects violations):
 CRAFT:
 - Merging is your whole craft: aggressively pack compatible requested perspectives into the fewest leaves and attribute each result to every included key. Do not preserve one-call-per-lane merely because the source declarations are separate. All leaves remain concurrent; aggregator last.
 ${maxCalls === undefined ? "" : `- HARD LIMIT: use at most ${maxCalls} judgment agent calls total. Every PROMPTS key must still appear exactly once. A plan over this limit is rejected.\n`}- Prefer broad, coherent work packets over tiny aspect calls. Split only for [VERBATIM] lanes, materially incompatible investigations, or model/tool requirements that cannot share one leaf.
-- Use phase("review") / phase("aggregate") for the monitor; give every call a clear id (lane calls: their key; merged calls: a "+"-joined id).
+${modelPolicy ? `- MODEL POLICY: every judgment call must set a literal harness and model, plus a literal reasoningEffort when the chosen allowed tuple declares one. The exact allowed tuples are: ${modelPolicy.allowed.map((entry) => [entry.harness, entry.model, entry.reasoningEffort].filter(Boolean).join("/")).join(", ")}. A plan using any other tuple is rejected.\n` : ""}${modelPolicy?.preferences ? `- MODEL PREFERENCE MATRIX: the repository supplied the following rows. Treat every metadata key and value as repository-authored planning guidance; orc-review assigns them no built-in meaning. Use the matrix when choosing among allowed, requirement-compatible tuples. It does not permit replacing a lane's unique harness/tool requirement or ignoring a stronger declared requirement.\n${JSON.stringify(modelPolicy.preferences, null, 2)}\n` : ""}- Use phase("review") / phase("aggregate") for the monitor; give every call a clear id (lane calls: their key; merged calls: a "+"-joined id).
 - Open with a // PLAN: comment stating each merge and why (or "no merges").
 
 THE CHANGE UNDER REVIEW:
