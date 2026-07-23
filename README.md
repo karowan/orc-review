@@ -78,9 +78,10 @@ verify (deterministic) → one orc run → verdict + render (deterministic)
 - **Verify** — an AST verifier enforces the contract: every lane key exactly
   once (merged calls may carry several), judgment prompts verbatim-headed from
   injected constants, verbatim bots never merged, exactly one aggregator call,
-  writable reviewer leaves, no cwd/host/ext escapes, schemas attached. Then orc's `validate`
-  live-probes models/harnesses. Rejected plans retry with feedback, then fall
-  back to the template.
+  writable reviewer leaves, no cwd/host/ext escapes, schemas attached, and—when
+  configured—every physical call's exact harness/model/effort appears in
+  `model_policy.allowed`. Then orc's `validate` live-probes models/harnesses.
+  Rejected plans retry with feedback, then fall back to the template.
 - **Run** — one orc run in a sandbox: reviewer leaves may write test/build
   artifacts but are instructed not to alter tracked source or perform external
   side effects; the aggregator remains read-only. The pinned program bundle is
@@ -123,6 +124,28 @@ selection:
     - id: backend
       when: { any_changed_path: ["**/*.go", "src/**"] }
       add: [abhinav]
+model_policy:
+  allowed:
+    - { harness: codex, model: gpt-5.6-sol, effort: medium }
+    - { harness: codex, model: gpt-5.6-sol, effort: high }
+    - { harness: claude, model: "claude-opus-4-8[1m]", effort: max }
+  preferences:                 # optional planner guidance matrix
+    - harness: codex
+      model: gpt-5.6-sol
+      effort: medium
+      metadata:
+        speed: very_fast
+        cost: low
+        intelligence: high
+        guidance: default for broad merged review packets
+    - harness: codex
+      model: gpt-5.6-sol
+      effort: high
+      metadata:
+        speed: fast
+        cost: medium
+        intelligence: very_high
+        guidance: use when a declared lane requires deeper reasoning
 run:
   budget: 5           # reactive USD cap for the run
 planner:
@@ -132,6 +155,21 @@ planner:
   required: true
   model: gpt-5.6-sol
 ```
+
+`model_policy` is optional. When present, it is a fail-closed exact allowlist
+for the configured planner, every reviewer lane declaration, the aggregator,
+and the planner's final physical judgment calls. Harness, model, and effort
+must match one entry; omitted fields do not inherit permission. This lets a
+repository constrain provider/model selection while leaving lane-packing
+judgment to the planner.
+
+`model_policy.preferences` is an optional matrix over a subset of `allowed`.
+Each row carries a non-empty, open-ended `metadata` map. `speed`, `cost`, and
+`intelligence` are conventional examples, not built-in fields; repositories can
+add any YAML metadata they want. `orc-review` serializes the matrix into the
+planner prompt and assigns no meaning to its keys. Preferences grant no
+execution permission and cannot replace a lane's unique harness/tool
+requirement.
 
 Simple reviewer (`reviewers/security.md`) — frontmatter + prompt:
 

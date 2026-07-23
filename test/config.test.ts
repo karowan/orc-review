@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig } from "../src/config.js";
+import { plannerPrompt } from "../src/planner.js";
 import { fixtureFiles, memTree } from "./helpers.js";
 
 const problemsOf = (files: Record<string, string>): string[] => {
@@ -26,6 +27,93 @@ describe("loadConfig", () => {
     expect(abhinav.lanes.map((l) => l.promptKey)).toEqual(["abhinav/lanes/0", "abhinav/lanes/1"]);
     expect(abhinav.aggregationNotes).toContain("Adjudicate");
     expect(abhinav.paths.length).toBeGreaterThan(2);
+  });
+
+  it("compiles and exposes an exact model allowlist", () => {
+    const files = fixtureFiles();
+    files[".orc-review/manifest.yaml"] += `
+model_policy:
+  allowed:
+    - { harness: claude, model: claude-fable-5 }
+    - { harness: claude, model: claude-opus-4-8 }
+    - { harness: claude, model: claude-sonnet-5 }
+    - { harness: codex, model: gpt-5.6-sol, effort: high }
+  preferences:
+    - harness: codex
+      model: gpt-5.6-sol
+      effort: high
+      metadata:
+        speed: fast
+        cost: medium
+        intelligence: high
+        best_for: deep review
+        custom: { cache_affinity: warm }
+`;
+    files[".orc-review/reviewers/security.md"] = files[".orc-review/reviewers/security.md"].replace(
+      "model: claude-fable-5",
+      "harness: claude\nmodel: claude-fable-5",
+    );
+    files[".orc-review/reviewers/abhinav/reviewer.yaml"] = files[
+      ".orc-review/reviewers/abhinav/reviewer.yaml"
+    ].replaceAll("    model:", "    harness: claude\n    model:");
+
+    const config = loadConfig(memTree(files));
+    expect(config.manifest.modelPolicy?.allowed).toContainEqual({
+      harness: "codex",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
+    });
+    expect(config.manifest.modelPolicy?.preferences).toEqual([
+      {
+        harness: "codex",
+        model: "gpt-5.6-sol",
+        reasoningEffort: "high",
+        metadata: {
+          speed: "fast",
+          cost: "medium",
+          intelligence: "high",
+          best_for: "deep review",
+          custom: { cache_affinity: "warm" },
+        },
+      },
+    ]);
+    expect(
+      plannerPrompt({
+        reviewers: config.reviewers,
+        facts: { repository: "repo", baseRef: "main", changedPaths: ["src/a.ts"] },
+        matchedRules: [],
+        modelPolicy: config.manifest.modelPolicy,
+      }),
+    ).toContain('"cache_affinity": "warm"');
+  });
+
+  it("requires every model preference to be allowed", () => {
+    const files = fixtureFiles();
+    files[".orc-review/manifest.yaml"] += `
+model_policy:
+  allowed:
+    - { harness: codex, model: gpt-5.6-sol, effort: high }
+  preferences:
+    - harness: codex
+      model: gpt-5.6-sol
+      effort: xhigh
+      metadata: { speed: slow }
+`;
+    expect(problemsOf(files).join("\n")).toContain(
+      "model_policy.preferences uses codex/gpt-5.6-sol/xhigh, which model_policy.allowed does not permit",
+    );
+  });
+
+  it("rejects configured model calls outside model_policy.allowed", () => {
+    const files = fixtureFiles();
+    files[".orc-review/manifest.yaml"] += `
+model_policy:
+  allowed:
+    - { harness: codex, model: gpt-5.6-sol, effort: high }
+`;
+    expect(problemsOf(files).join("\n")).toContain(
+      "reviewer security lane security/prompt uses <unset harness>/claude-fable-5, which model_policy.allowed does not permit",
+    );
   });
 
   it("accepts rev 1's synthesis: block as an aggregation_notes alias", () => {

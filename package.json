@@ -1,6 +1,6 @@
 {
   "name": "orc-review",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "license": "0BSD",
   "type": "module",
   "description": "Model-planned code review workflows on the orc runtime: creation, running, and monitoring of the review workflow \u2014 nothing past it.",

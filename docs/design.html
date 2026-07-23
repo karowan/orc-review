@@ -311,6 +311,20 @@ selection:
     - id: backend
       when: { any_changed_path: ["**/*.go", "src/**"] }
       add: [quality-team]
+model_policy:
+  allowed:                      # exact, fail-closed tuples
+    - { harness: codex, model: gpt-5.6-sol, effort: medium }
+    - { harness: codex, model: gpt-5.6-sol, effort: high }
+    - { harness: claude, model: "claude-opus-4-8[1m]", effort: max }
+  preferences:                  # optional planner guidance matrix
+    - harness: codex
+      model: gpt-5.6-sol
+      effort: medium
+      metadata:
+        speed: very_fast
+        cost: low
+        intelligence: high
+        guidance: default for broad merged review packets
 run:
   budget: 5                    # reactive USD cap for the whole run
   max_parallel: 8
@@ -323,6 +337,19 @@ planner:
   max_calls: 6
   required: true               # no unoptimized fallback may exceed max_calls
   # disabled: true             # alternative: deterministic template only</code></pre>
+
+<p>
+  <code>model_policy.allowed</code> is optional. When present, it constrains the configured
+  planner, reviewer declarations, aggregator, and the planner's final physical judgment calls to
+  exact harness/model/effort tuples. Validation fails closed: an omitted field or a planner-selected
+  tuple outside the list is rejected before execution. The planner still decides how compatible
+  lanes are packed; it cannot escape the repository's model boundary while doing so.
+  <code>preferences</code> is a matrix over a subset of <code>allowed</code>. Every row carries a
+  non-empty, open-ended <code>metadata</code> map. Keys such as <code>speed</code>,
+  <code>cost</code>, and <code>intelligence</code> are conventions rather than engine semantics;
+  the complete matrix is serialized into the planner prompt without interpretation. Preference
+  metadata grants no additional execution permission.
+</p>
 
 <p>Simple reviewer — one markdown file:</p>
 <pre><code>---
