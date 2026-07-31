@@ -40,7 +40,7 @@ export function claudeCliPlanner(model: string = DEFAULT_PLANNER_MODEL): PlanMod
     });
 }
 
-/** Runs the planner through the local `codex` CLI (user's own subscription auth). */
+/** Runs the planner through the local `codex` CLI (locally configured provider and auth). */
 export function codexCliPlanner(
   model: string = DEFAULT_CODEX_PLANNER_MODEL,
   effort: string = DEFAULT_CODEX_PLANNER_EFFORT,
@@ -56,7 +56,6 @@ export function codexCliPlanner(
           "--sandbox",
           "read-only",
           "--ephemeral",
-          "--ignore-user-config",
           "--ignore-rules",
           "--skip-git-repo-check",
           "-c",
