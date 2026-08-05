@@ -29,7 +29,19 @@ fail-closed verdicts) predate this repo; the execution paradigm is orc's.
    head) are excluded from the cohort and the verdict is capped at ADVISORY.
    Reviewer definitions are **always compiled from the base tree** — a PR cannot
    alter its own reviewers.
-3. **Plan (model craft).** A planner model receives the compiled reviewer specs,
+3. **Resolve models (deterministic law).** Declared model names in manifests are
+   canonical and portable (`claude-opus-5[1m]`, `gpt-5.6-sol`); the host's
+   deployment may report them under gateway ids (`openai.gpt-5.6-sol`,
+   `global.anthropic.claude-opus-5[1m]`, Bedrock/Vertex versioned forms).
+   `src/models.ts` fetches the host catalog through orc's own discovery and
+   rewrites every model surface — lanes, `model_policy`, planner, aggregator —
+   to ids the host actually reported, before the plan contract is computed.
+   Resolution is shape-based (namespace stripping, versioned-id coverage),
+   never a model list; unservable declared models fail closed, unservable
+   policy-only entries are dropped from the menu, and every rewrite is recorded
+   in `PreparedReview.modelResolution`. A plan artifact is therefore bound to
+   the host catalog it was resolved against.
+4. **Plan (model craft).** A planner model receives the compiled reviewer specs,
    selection rules, and diff facts, and authors the literal `review.orc.ts` —
    one program, one run, one promise graph, **flat** (rev 2): the union of every
    eligible bot's lanes runs as one concurrent layer with no per-reviewer
@@ -39,7 +51,7 @@ fail-closed verdicts) predate this repo; the execution paradigm is orc's.
    strongest declared model wins, `verbatim: true` bots are exempt. There is no
    support tier: every agent call is a judgment lane or the aggregator; a bot
    that wants extra work (e.g. running tests) declares it as a lane.
-4. **Verify (deterministic law).** The generated program is checked by AST:
+5. **Verify (deterministic law).** The generated program is checked by AST:
    every lane key runs exactly once (a merged call may carry several keys, each
    interpolated verbatim — the planner never holds prompt bodies); judgment
    prompts are PROMPTS-headed; verbatim bots' keys sit in single-key calls;
@@ -51,7 +63,7 @@ fail-closed verdicts) predate this repo; the execution paradigm is orc's.
    over judgment calls. Bounded retry includes verifier feedback; when
    `planner.required: true`, invalid planning fails closed rather than expanding
    into the deterministic unmerged fallback.
-5. **Run.** One orc run: pinned bundle (its sha256 is the review spec), journal
+6. **Run.** One orc run: pinned bundle (its sha256 is the review spec), journal
    as the evidence trail, orc's monitor as the review UI. All leaves read-only.
    The single **aggregator** (default `gpt-5.6-sol` on codex; `run.aggregator_*`
    to override) consumes every lane envelope directly and dedupes aggressively:
@@ -60,7 +72,7 @@ fail-closed verdicts) predate this repo; the execution paradigm is orc's.
    coalesce. Depth is exactly 1 — no other stage merges judgment. Per-bot
    `aggregation_notes` (rev 1's internal `synthesis:` prompt, repurposed) carry
    each bot's adjudication voice into the aggregator.
-6. **Render (deterministic law).** Fail-closed verdict algebra ported from
+7. **Render (deterministic law).** Fail-closed verdict algebra ported from
    the predecessor design, with rev 2 lane semantics: a failed lane degrades coverage
    (noted in the review); a required bot with **zero** surviving lanes — or a
    total wipeout — → `PARTIAL — NOT APPROVED`; surviving blocking finding →

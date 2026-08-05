@@ -34,6 +34,7 @@ import {
   DEFAULT_PLANNER_MODEL,
   type PlanModel,
 } from "./planner.js";
+import { fetchHostCatalog, resolveReviewModels, type HostModelCatalog, type ModelResolutionNote } from "./models.js";
 import { render, type RenderedReview } from "./render.js";
 import { loadLocalReviewers } from "./registry.js";
 import { select } from "./selection.js";
@@ -57,6 +58,11 @@ export interface ReviewOptions {
   planner?: PlanModel | null;
   /** Prior `plan --program --json` output whose exact verified program must run. */
   preparedPlan?: unknown;
+  /**
+   * Host model catalog override: `null` disables model resolution entirely,
+   * omitted probes the live host through orc's discovery.
+   */
+  hostCatalog?: HostModelCatalog | null;
   budgetUsd?: number;
   affinity?: string[];
   /** Local-registry bots to call onto this run (always advisory). */
@@ -114,6 +120,8 @@ export interface PreparedReview {
   planContractSha256?: string;
   plannerUsed: "model" | "template" | "none";
   rejectedPlans: string[][];
+  /** Declared → host-id rewrites performed by model resolution (empty when none). */
+  modelResolution: ModelResolutionNote[];
 }
 
 export interface ReviewOutcome {
@@ -213,6 +221,7 @@ function reusePreparedPlan(
   if (saved.planContractSha256 !== contractSha256) {
     throw new ConfigError([
       "--plan-file does not match the current change, reviewer definitions, models, or run policy; generate a fresh plan",
+      "a plan is also bound to the host model catalog it was resolved against — a different host or a changed catalog invalidates it (compare the plan file's modelResolution)",
     ]);
   }
   if (
@@ -351,16 +360,47 @@ export async function prepare(opts: ReviewOptions): Promise<PreparedReview> {
     localBots,
     plannerUsed: "none",
     rejectedPlans: [],
+    modelResolution: [],
   };
   if (eligible.length === 0 || opts.planOnly) return base;
 
   const primaryManifest = perRepo.find((r) => r.config)?.config?.manifest;
+  // Reconcile declared canonical model names with what this host's deployment
+  // actually calls them (gateway hosts namespace ids: openai.gpt-5.6-sol,
+  // global.anthropic.claude-opus-5[1m]). Must happen before the plan contract,
+  // planner prompt, and program assembly, so every downstream surface speaks
+  // host ids consistently, and must depend only on repo content plus the host
+  // catalog — never run-time options — so plan and run re-derive identically.
+  const aggregator = aggregatorOptions(primaryManifest);
+  let catalog: HostModelCatalog | null = null;
+  if (opts.hostCatalog !== undefined) {
+    catalog = opts.hostCatalog;
+  } else {
+    try {
+      catalog = await fetchHostCatalog(cwd, primaryManifest?.run.defaultHarness);
+    } catch (err) {
+      // A host that cannot report a catalog keeps pass-through behavior, the
+      // same leniency as an empty catalog; orc's own preflight remains the
+      // authority on whether the declared models actually run here.
+      progress(`host model catalog unavailable (${err instanceof Error ? err.message : String(err)}); model resolution skipped`);
+    }
+  }
+  if (catalog) {
+    base.modelResolution = resolveReviewModels({ eligible, manifest: primaryManifest, aggregator, catalog });
+    for (const note of base.modelResolution) {
+      progress(
+        note.dropped
+          ? `model ${note.declared} (${note.harness}) dropped from policy — not available on this host`
+          : `model ${note.declared} → ${note.resolved} (${note.harness})`,
+      );
+    }
+  }
   const assembly: AssemblyInput = {
     reviewers: eligible,
     facts,
     headSha: changeId,
     matchedRules,
-    aggregator: aggregatorOptions(primaryManifest),
+    aggregator,
   };
   const maxJudgmentCalls = primaryManifest?.planner?.maxCalls;
   const modelPolicy = primaryManifest?.modelPolicy;
@@ -659,6 +699,12 @@ export async function execute(p: PreparedReview, opts: ReviewOptions): Promise<R
       ]),
       ["plan", `${p.plannerUsed} · sha256:${p.programSha256}`],
       ["aggregator", `${agg.harness} · ${agg.model}`],
+      ...p.modelResolution.map((n): [string, string] => [
+        "model",
+        n.dropped
+          ? `${n.declared} (${n.harness}) dropped from policy — not available on this host`
+          : `${n.declared} → ${n.resolved} (${n.harness})`,
+      ]),
       ...p.eligible.map((r): [string, string] => [
         `reviewer ${r.id}`,
         `${p.localBots.includes(r.id) ? "local · " : ""}sha256:${r.contentHash.slice(0, 16)}`,

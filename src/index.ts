@@ -7,6 +7,15 @@ export { assemble, promptTable, MERGE_PROMPT } from "./assemble.js";
 export { templateProgram } from "./template.js";
 export { plannerPrompt, claudeCliPlanner, extractProgramBody, DEFAULT_PLANNER_MODEL, type PlanModel } from "./planner.js";
 export { verifyProgram } from "./verify.js";
+export {
+  fetchHostCatalog,
+  parseHostCatalog,
+  resolveModelName,
+  resolveReviewModels,
+  versionedCoverage,
+  type HostModelCatalog,
+  type ModelResolutionNote,
+} from "./models.js";
 export { evaluate, parseProgramResult, type Evaluation, type VerdictInput } from "./verdict.js";
 export { render, type RenderedReview, type RenderInput, type InlineComment } from "./render.js";
 export { prepare, execute, review, aggregatorOptions, qualifyReviewer, type ReviewOptions, type PreparedReview, type ReviewOutcome, type RepoReview } from "./runner.js";
