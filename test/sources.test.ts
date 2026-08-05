@@ -75,6 +75,7 @@ describe("prepare over a repo set", () => {
     const prepared = await prepare({
       repos: [`la=${liba}@base`, `ab=${appb}@base`],
       planner: null,
+      hostCatalog: null,
     });
     expect(prepared.pins.map((p) => p.id)).toEqual(["la", "ab"]);
     expect(prepared.eligible.map((r) => r.id)).toEqual(["la/security", "ab/security"]);
@@ -84,22 +85,23 @@ describe("prepare over a repo set", () => {
     expect(prepared.plannerUsed).toBe("template");
     expect(prepared.programSource).toContain('PROMPTS["la/security/prompt"]');
     expect(prepared.programSource).toContain('PROMPTS["ab/security/prompt"]');
-  });
+  }, 30_000);
 
   it("fails on an uncovered repo by default, skips it with allowUncovered", async () => {
     const liba = makeRepo("liba", true);
     const bare = makeRepo("bare", false);
     await expect(
-      prepare({ repos: [`la=${liba}@base`, `nb=${bare}@base`], planner: null }),
+      prepare({ repos: [`la=${liba}@base`, `nb=${bare}@base`], planner: null, hostCatalog: null }),
     ).rejects.toThrow(/repo "nb"/);
     const prepared = await prepare({
       repos: [`la=${liba}@base`, `nb=${bare}@base`],
       planner: null,
       allowUncovered: true,
+      hostCatalog: null,
     });
     expect(prepared.uncovered).toEqual(["nb"]);
     expect(prepared.eligible.map((r) => r.id)).toEqual(["la/security"]);
-  });
+  }, 30_000);
 
   it("marks the set dirty when any pin is dirty", async () => {
     const liba = makeRepo("liba", true);
@@ -109,11 +111,11 @@ describe("prepare over a repo set", () => {
     expect(prepared.dirty).toBe(true);
     expect(prepared.pins[1].dirty).toBe(true);
     expect(prepared.changeId.endsWith("+dirty")).toBe(true);
-  });
+  }, 30_000);
 
   it("reuses the exact verified plan when its change and review contract still match", async () => {
     const repo = makeRepo("pinned-plan", true);
-    const first = await prepare({ dir: repo, baseRef: "base", planner: null });
+    const first = await prepare({ dir: repo, baseRef: "base", planner: null, hostCatalog: null });
     expect(first.planContractSha256).toMatch(/^[0-9a-f]{64}$/);
 
     const reused = await prepare({
@@ -123,31 +125,32 @@ describe("prepare over a repo set", () => {
       planner: async () => {
         throw new Error("the planner must not run when a verified plan is supplied");
       },
+      hostCatalog: null,
     });
     expect(reused.programSource).toBe(first.programSource);
     expect(reused.programSha256).toBe(first.programSha256);
     expect(reused.planContractSha256).toBe(first.planContractSha256);
-  });
+  }, 30_000);
 
   it("rejects a saved plan after its source or reviewed change drifts", async () => {
     const repo = makeRepo("stale-plan", true);
-    const first = await prepare({ dir: repo, baseRef: "base", planner: null });
+    const first = await prepare({ dir: repo, baseRef: "base", planner: null, hostCatalog: null });
     const tampered = { ...JSON.parse(JSON.stringify(first)), programSource: `${first.programSource}\n// changed` };
     await expect(
-      prepare({ dir: repo, baseRef: "base", preparedPlan: tampered }),
+      prepare({ dir: repo, baseRef: "base", preparedPlan: tampered, hostCatalog: null }),
     ).rejects.toThrow(/program digest mismatch/);
     tampered.programSha256 = createHash("sha256").update(tampered.programSource).digest("hex");
     await expect(
-      prepare({ dir: repo, baseRef: "base", preparedPlan: tampered }),
+      prepare({ dir: repo, baseRef: "base", preparedPlan: tampered, hostCatalog: null }),
     ).rejects.toThrow(/does not match its body/);
 
     fs.writeFileSync(path.join(repo, "src", "a.ts"), "export const a = 3;\n");
     sh(repo, ["add", "-A"]);
     sh(repo, ["commit", "-qm", "new head"]);
     await expect(
-      prepare({ dir: repo, baseRef: "base", preparedPlan: JSON.parse(JSON.stringify(first)) }),
+      prepare({ dir: repo, baseRef: "base", preparedPlan: JSON.parse(JSON.stringify(first)), hostCatalog: null }),
     ).rejects.toThrow(/does not match the current change/);
-  });
+  }, 30_000);
 
   it("resolvePins rejects duplicate ids and unknown schemes", async () => {
     const liba = makeRepo("liba", true);

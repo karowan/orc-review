@@ -192,6 +192,7 @@ program
               plannerUsed: prepared.plannerUsed,
               programPath: prepared.programPath,
               rejectedPlans: prepared.rejectedPlans,
+              modelResolution: prepared.modelResolution,
             },
             null,
             2,
