@@ -42,7 +42,7 @@ import { parseRepoArg, resolvePins, type RepoArg } from "./sources.js";
 import { templateProgram } from "./template.js";
 import { evaluate, parseProgramResult, type Evaluation, type ParsedProgramResult } from "./verdict.js";
 import { verifyProgram } from "./verify.js";
-import { composeWorkspace } from "./workspace.js";
+import { composeWorkspace, discardWorkspace } from "./workspace.js";
 
 const PLAN_ATTEMPTS = 2;
 
@@ -654,8 +654,23 @@ export async function execute(p: PreparedReview, opts: ReviewOptions): Promise<R
   progress(`monitor: ${run.info.monitorUrl}`);
 
   let status = await run.status();
-  while (status.state === "running") {
-    status = await run.wait(300);
+  try {
+    while (status.state === "running") {
+      status = await run.wait(300);
+    }
+  } finally {
+    // The workspace is scratch: symlinks plus this review's tool caches, and
+    // the caches are the bulk — a Go build alone leaves ~1 GB. Nothing else
+    // reaps them, so leaving one behind per review is an unbounded disk leak
+    // that reached 211 GB on one host. Discard on every exit path, including
+    // a failed or abandoned run, exactly as a killed review must not keep its
+    // disk. The evidence the reader needs (result, journal, monitor report)
+    // lives outside the workspace and is unaffected.
+    try {
+      discardWorkspace(workspaceDir);
+    } catch {
+      /* a leaked workspace must never fail an otherwise good review */
+    }
   }
 
   let result = null;
