@@ -241,3 +241,67 @@ export default async ({ agent, parallel, phase }) => {
     expect(problems).toContain("dynamic PROMPTS access");
   });
 });
+
+describe("harness pinning", () => {
+  // The production failure this encodes: "pick the strongest declared
+  // model/effort among the merged lanes" put six codex-declared lanes onto one
+  // claude call, so one provider's weekly limit failed entire cross-persona
+  // bundles. A declared harness is a pin, not a preference.
+  const pinned = reviewers.map((reviewer) => ({
+    ...reviewer,
+    lanes: reviewer.lanes.map((lane, index) => ({
+      ...lane,
+      // abhinav: lane 0 claude, lane 1 codex; security: codex — the real shape.
+      harness: reviewer.id === "abhinav" && index === 0 ? "claude" : "codex",
+      model: reviewer.id === "abhinav" && index === 0 ? "claude-opus-5[1m]" : "gpt-5.6-sol",
+    })),
+  }));
+  const pinnedAssembly = { ...assembly, reviewers: pinned };
+
+  const merged = (harness: string, model: string) => `// PLAN: merge security + abhinav/0
+export default async ({ agent, parallel, phase }) => {
+  const lanes = await phase("review", () => parallel([
+    { prompt: \`\${PROMPTS["security/prompt"]}\\n\\n\${PROMPTS["abhinav/lanes/0"]}\`, id: "security/prompt+abhinav/lanes/0", readOnly: false, schema: SCHEMAS.findings, harness: "${harness}", model: "${model}" },
+    { prompt: PROMPTS["abhinav/lanes/1"], id: "abhinav/lanes/1", readOnly: false, schema: SCHEMAS.findings, harness: "codex", model: "gpt-5.6-sol" },
+  ]));
+  ${AGG_CALL}
+  return { consolidated, laneOutcomes: { "security/prompt": lanes[0].status, "abhinav/lanes/0": lanes[0].status, "abhinav/lanes/1": lanes[1].status } };
+};`;
+
+  it("rejects merging lanes whose declared harnesses differ", () => {
+    const problems = verifyProgram(assemble(pinnedAssembly, merged("claude", "claude-opus-5[1m]")), pinned);
+    expect(problems.join("\n")).toContain("merges lanes with different declared harnesses");
+  });
+
+  it("rejects a call whose harness is not its lanes' declared harness", () => {
+    const body = `// PLAN: no merges
+export default async ({ agent, parallel, phase }) => {
+  const lanes = await phase("review", () => parallel([
+    { prompt: PROMPTS["security/prompt"], id: "security/prompt", readOnly: false, schema: SCHEMAS.findings, harness: "claude", model: "claude-opus-5[1m]" },
+    { prompt: PROMPTS["abhinav/lanes/0"], id: "abhinav/lanes/0", readOnly: false, schema: SCHEMAS.findings, harness: "claude", model: "claude-opus-5[1m]" },
+    { prompt: PROMPTS["abhinav/lanes/1"], id: "abhinav/lanes/1", readOnly: false, schema: SCHEMAS.findings, harness: "codex", model: "gpt-5.6-sol" },
+  ]));
+  ${AGG_CALL}
+  return { consolidated, laneOutcomes: { "security/prompt": lanes[0].status, "abhinav/lanes/0": lanes[1].status, "abhinav/lanes/1": lanes[2].status } };
+};`;
+    const problems = verifyProgram(assemble(pinnedAssembly, body), pinned);
+    expect(problems.join("\n")).toContain('declare "codex" — a declared harness is a pin');
+  });
+
+  it("accepts homogeneous bundles on their declared harness", () => {
+    const body = `// PLAN: merge the codex lanes; the claude lane runs alone
+export default async ({ agent, parallel, phase }) => {
+  const lanes = await phase("review", () => parallel([
+    { prompt: \`\${PROMPTS["security/prompt"]}\\n\\n\${PROMPTS["abhinav/lanes/1"]}\`, id: "security/prompt+abhinav/lanes/1", readOnly: false, schema: SCHEMAS.findings, harness: "codex", model: "gpt-5.6-sol" },
+    { prompt: PROMPTS["abhinav/lanes/0"], id: "abhinav/lanes/0", readOnly: false, schema: SCHEMAS.findings, harness: "claude", model: "claude-opus-5[1m]" },
+  ]));
+  ${AGG_CALL}
+  return { consolidated, laneOutcomes: { "security/prompt": lanes[0].status, "abhinav/lanes/1": lanes[0].status, "abhinav/lanes/0": lanes[1].status } };
+};`;
+    expect(verifyProgram(assemble(pinnedAssembly, body), pinned)).toEqual([]);
+  });
+
+  it("leaves lanes that declare no harness free to ride in any bundle", () => {
+    expect(verifyProgram(wrap(merged("claude", "claude-opus-5[1m]")), reviewers)).toEqual([]);
+  });
+});

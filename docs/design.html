@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>orc-review · architecture and behavior</title>
+<title>The Orc review system · runtime, review engine, and Hermes automation</title>
 <style>
   :root {
     --paper: #f4f5f3;
@@ -138,6 +138,63 @@
   .toc li { break-inside: avoid; }
   @media (max-width: 700px) { .toc { columns: 1; } }
   .footnote { color: var(--ink-faint); font-size: 0.85rem; margin-top: 40px; border-top: 1px solid var(--line); padding-top: 14px; }
+  .stack { display: grid; gap: 0; min-width: 640px; }
+  .stack-layer {
+    display: grid; grid-template-columns: 150px 1fr; gap: 18px; align-items: center;
+    border: 1px solid var(--line); border-radius: 7px; background: var(--paper);
+    padding: 16px 18px;
+  }
+  .stack-layer + .stack-arrow { color: var(--ink-faint); text-align: center; padding: 4px; }
+  .stack-name { font: 600 0.9rem/1.35 ui-monospace, Menlo, monospace; }
+  .stack-copy { color: var(--ink-soft); font-size: 0.9rem; }
+  .stack-copy strong { color: var(--ink); }
+  .stack-layer.hermes { box-shadow: inset 4px 0 0 var(--bot-b); }
+  .stack-layer.review { box-shadow: inset 4px 0 0 var(--craft); }
+  .stack-layer.orc { box-shadow: inset 4px 0 0 var(--law); }
+  .stack-layer.models { box-shadow: inset 4px 0 0 var(--bot-c); }
+  .cap-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+  .cap {
+    border-top: 3px solid var(--line); padding: 10px 4px 0;
+    color: var(--ink-soft); font-size: 0.88rem;
+  }
+  .cap strong { display: block; color: var(--ink); font: 0.82rem/1.4 ui-monospace, Menlo, monospace; margin-bottom: 4px; }
+  .cap.orc { border-top-color: var(--law); }
+  .cap.review { border-top-color: var(--craft); }
+  .cap.hermes { border-top-color: var(--bot-b); }
+  .sequence { display: grid; grid-template-columns: 116px 1fr; gap: 0 16px; min-width: 680px; }
+  .seq-who {
+    font: 0.72rem/1.35 ui-monospace, Menlo, monospace; color: var(--ink-faint);
+    text-align: right; padding: 12px 0;
+  }
+  .seq-step {
+    position: relative; border-left: 1px solid var(--line); padding: 10px 0 14px 24px;
+  }
+  .seq-step::before {
+    content: ""; position: absolute; left: -5px; top: 16px; width: 9px; height: 9px;
+    border-radius: 50%; background: var(--paper); border: 2px solid var(--law);
+  }
+  .seq-step.model::before { border-color: var(--craft); }
+  .seq-step.publish::before { border-color: var(--bot-b); }
+  .seq-step strong { font: 0.82rem/1.4 ui-monospace, Menlo, monospace; }
+  .seq-step span { display: block; color: var(--ink-soft); font-size: 0.86rem; margin-top: 2px; }
+  .artifact-line { display: flex; justify-content: center; align-items: center; gap: 8px; flex-wrap: wrap; margin: 18px 0; }
+  .artifact {
+    font: 0.72rem/1.35 ui-monospace, Menlo, monospace; border: 1px solid var(--line);
+    border-radius: 4px; background: var(--paper); padding: 7px 9px;
+  }
+  .artifact-arrow { color: var(--ink-faint); }
+  .authority-yes { color: var(--good); font-weight: 600; }
+  .authority-no { color: var(--ink-faint); }
+  .authority-scoped { color: var(--craft); font-weight: 600; }
+  .callout {
+    background: var(--law-soft); border-left: 3px solid var(--law); border-radius: 0 6px 6px 0;
+    padding: 14px 16px; margin: 20px 0;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  @media (max-width: 700px) {
+    .cap-grid { grid-template-columns: 1fr; }
+    .stack-layer { grid-template-columns: 1fr; gap: 5px; }
+  }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -145,14 +202,18 @@
 
 <main>
 <header>
-  <div class="eyebrow">orc-review · architecture and behavior</div>
-  <h1>orc-review: model-planned code review workflows on the orc runtime</h1>
+  <div class="eyebrow">Orc · orc-review · Hermes</div>
+  <h1>The Orc review system: from durable agent execution to autonomous pull-request review</h1>
   <p class="meta">
-    orc-review creates, runs, and monitors model-assisted code review workflows on the orc runtime.
-    It selects a repository-defined reviewer cohort, produces a verified execution plan, runs the
-    review, and returns a consolidated verdict with complete provenance.
+    Three deliberately separate layers compose one system. <strong>Orc</strong> runs durable,
+    journaled agent programs. <strong>orc-review</strong> turns repository policy and reviewer
+    definitions into a verified review workflow. A <strong>Hermes orchestrator</strong> watches a
+    code host, prepares disposable review inputs, runs the engine, records operations, and publishes
+    only the side effects it is authorized to make.
   </p>
   <ol class="toc">
+    <li><a href="#system">The three-layer system</a></li>
+    <li><a href="#orc">Orc: the execution substrate</a></li>
     <li><a href="#pipeline">The pipeline: deterministic → model-planned → deterministic</a></li>
     <li><a href="#change">The change under review: repo sets</a></li>
     <li><a href="#config">Configuration &amp; reviewer authoring</a></li>
@@ -167,10 +228,87 @@
     <li><a href="#surfaces">CLI &amp; library surfaces</a></li>
     <li><a href="#invariants">Invariants</a></li>
     <li><a href="#boundaries">Integration boundaries</a></li>
+    <li><a href="#hermes">Hermes: autonomous orchestration</a></li>
+    <li><a href="#end-to-end">One pull request, end to end</a></li>
+    <li><a href="#authority">Authority and isolation</a></li>
+    <li><a href="#durability">Durability across all three layers</a></li>
   </ol>
 </header>
 
-<h2 id="pipeline">1 · The pipeline: <span class="stage-label law-tag">deterministic</span> → <span class="stage-label craft-tag">model-planned</span> → <span class="stage-label law-tag">deterministic</span></h2>
+<h2 id="system">1 · The three-layer system</h2>
+
+<p>
+  The layers are composed in one direction and keep different kinds of policy. Hermes owns the
+  outside world, orc-review owns review semantics, and Orc owns execution semantics. Neither a
+  reviewer prompt nor a model-generated plan is allowed to acquire the authority of the layer above it.
+</p>
+
+<div class="diagram wide">
+  <div class="stack" role="img" aria-label="Hermes invokes orc-review, which generates and runs a verified program on Orc, which invokes model harnesses.">
+    <div class="stack-layer hermes">
+      <div class="stack-name">Hermes orchestrator</div>
+      <div class="stack-copy"><strong>When and where.</strong> Discover PRs, deduplicate, collect GitHub context, create disposable worktrees, maintain the operational ledger, recover workers, and publish COMMENT reviews.</div>
+    </div>
+    <div class="stack-arrow">↓ invokes the public CLI with a pinned change and bounded context</div>
+    <div class="stack-layer review">
+      <div class="stack-name">orc-review</div>
+      <div class="stack-copy"><strong>Who and how.</strong> Select reviewers from repository rules, preserve their own prompts/models, ask a planner to pack compatible lanes, verify the literal program, aggregate findings, and compute a fail-closed dry-run verdict.</div>
+    </div>
+    <div class="stack-arrow">↓ compiles the review into one promise-native program</div>
+    <div class="stack-layer orc">
+      <div class="stack-name">Orc runtime</div>
+      <div class="stack-copy"><strong>Execution and evidence.</strong> Freeze the program bundle, schedule agent leaves, enforce budgets and sandbox policy, journal completions before delivery, replay or resume safely, and expose a live monitor plus report.</div>
+    </div>
+    <div class="stack-arrow">↓ dispatches leaves through native harnesses</div>
+    <div class="stack-layer models">
+      <div class="stack-name">Reviewer models</div>
+      <div class="stack-copy"><strong>Judgment.</strong> Codex and Claude lanes inspect the pinned workspace, run checks, and return schema-bound findings. Each reviewer retains its own provider, model, effort, prompt, attribution, and blocking semantics.</div>
+    </div>
+  </div>
+</div>
+
+<div class="cap-grid">
+  <div class="cap orc"><strong>Orc is domain-neutral</strong>It knows agent calls, promises, journals, harnesses, sandboxes, approvals, and replay—not pull requests or review severity.</div>
+  <div class="cap review"><strong>orc-review is host-neutral</strong>It knows diffs, reviewer selection, plans, findings, omissions, and verdicts—not GitHub polling, credentials, queues, or publication.</div>
+  <div class="cap hermes"><strong>Hermes is the coordinator</strong>It owns scheduling, code-host state, recovery across cron ticks, and the final publication boundary.</div>
+</div>
+
+<h2 id="orc">2 · Orc: the execution substrate</h2>
+
+<p>
+  An Orc program is a default-exported async TypeScript function. Its promise graph is the
+  dependency graph: independent <code>agent()</code> calls can run concurrently, and a downstream
+  call starts as soon as the value it awaits is durable. orc-review generates one such program per
+  attempt rather than building a second workflow engine.
+</p>
+
+<pre><code>const review: Program = async ({ agent, phase }) =&gt; {
+  const lanes = await Promise.all(judgmentCalls.map(call =&gt;
+    agent(call.prompt, { schema: findingsSchema, ...call.policy })
+  ));
+
+  return phase("aggregate", () =&gt;
+    agent(renderAggregationPrompt(lanes), { schema: reviewSchema, readOnly: true })
+  );
+};</code></pre>
+
+<div class="artifact-line" aria-label="Orc durability chain">
+  <span class="artifact">frozen program bundle</span><span class="artifact-arrow">→</span>
+  <span class="artifact">validated first frontier</span><span class="artifact-arrow">→</span>
+  <span class="artifact">scheduled leaves</span><span class="artifact-arrow">→</span>
+  <span class="artifact">fsynced journal</span><span class="artifact-arrow">→</span>
+  <span class="artifact">replay / resume / report</span>
+</div>
+
+<p>
+  The write-ahead invariant is the foundation: a leaf completion is persisted before it is
+  delivered back into the program. Replay re-executes the frozen bytes and feeds those completions
+  in recorded order; digest mismatches, dangling entries, and unconsumed journal suffixes fail
+  loudly. Write leaves resume fail-forward with a fresh workspace status briefing rather than being
+  blindly repeated. The same operation registry powers the CLI, embedded SDK, and MCP surface.
+</p>
+
+<h2 id="pipeline">3 · The orc-review pipeline: <span class="stage-label law-tag">deterministic</span> → <span class="stage-label craft-tag">model-planned</span> → <span class="stage-label law-tag">deterministic</span></h2>
 
 <p>
   Deterministic logic decides <em>who</em> reviews and <em>whether the result can be trusted</em>;
@@ -210,7 +348,7 @@
   </div>
 </div>
 
-<h2 id="change">2 · The change under review: repo sets</h2>
+<h2 id="change">4 · The change under review: repo sets</h2>
 
 <p>
   A review accepts <strong>one or more pinned repositories</strong>. Running
@@ -281,7 +419,7 @@ orc-review run --repo github:acme/lib#412               # custom source, scheme-
   <code>PARTIAL — NOT APPROVED</code>: unjudged changes never approve.
 </p>
 
-<h2 id="config">3 · Configuration &amp; reviewer authoring</h2>
+<h2 id="config">5 · Configuration &amp; reviewer authoring</h2>
 
 <p>
   Config is <strong>repository-owned</strong> and trusted <strong>only from the base tree</strong>
@@ -375,7 +513,7 @@ aggregation_notes: prompts/adjudicate.md   # injected into the aggregator and at
   <code>app/security/prompt</code>, display "Security (app)".
 </p>
 
-<h2 id="registry">4 · The local bot registry</h2>
+<h2 id="registry">6 · The local bot registry</h2>
 
 <p>
   Personal bots live once in <code>~/.orc-review/registry/</code> (same authoring formats) and are
@@ -391,7 +529,7 @@ aggregation_notes: prompts/adjudicate.md   # injected into the aggregator and at
   personal bot as a merge gate defines it in its own <code>.orc-review</code> like any reviewer.
 </p>
 
-<h2 id="selection">5 · Selection &amp; eligibility <span class="stage-label law-tag">deterministic</span></h2>
+<h2 id="selection">7 · Selection &amp; eligibility <span class="stage-label law-tag">deterministic</span></h2>
 
 <p>
   Both run <strong>per repo</strong>, with repo-relative facts — manifests never see namespacing.
@@ -413,7 +551,7 @@ aggregation_notes: prompts/adjudicate.md   # injected into the aggregator and at
       run's verdict at ADVISORY.</li>
 </ul>
 
-<h2 id="governance">6 · Governor &amp; corroborator routing <span class="stage-label law-tag">deterministic</span></h2>
+<h2 id="governance">8 · Governor &amp; corroborator routing <span class="stage-label law-tag">deterministic</span></h2>
 
 <p>
   Each path rule adds the reviewer responsible for an area and any corroborating reviewers needed
@@ -459,7 +597,7 @@ selection:
 
 <div class="invariant"><p><strong>Models never choose review authority.</strong> Repository rules choose the cohort from changed paths. The planner may combine selected work, but cannot add, remove, or replace a governor.</p></div>
 
-<h2 id="planning">7 · Planning: the flat lane layer <span class="stage-label craft-tag">model-planned</span></h2>
+<h2 id="planning">9 · Planning: the flat lane layer <span class="stage-label craft-tag">model-planned</span></h2>
 
 <p>
   A planner model (default <code>claude-fable-5</code> via the <code>claude</code> CLI, pluggable)
@@ -501,7 +639,7 @@ selection:
   coordinator that wants planning and long-running execution in separate durable steps.
 </p>
 
-<h2 id="verification">8 · Verification <span class="stage-label law-tag">deterministic</span></h2>
+<h2 id="verification">10 · Verification <span class="stage-label law-tag">deterministic</span></h2>
 
 <p>A TypeScript-AST verifier checks the assembled program before execution:</p>
 <div class="table-wrap"><table>
@@ -521,7 +659,7 @@ selection:
   prove; the structural rules still prevent direct cross-lane prompt references.
 </p>
 
-<h2 id="execution">9 · Execution on orc</h2>
+<h2 id="execution">11 · Execution on orc</h2>
 
 <p>
   One orc run per attempt: the pinned program bundle (sha256 recorded) <em>is</em> the review spec,
@@ -543,7 +681,7 @@ selection:
   replay come from orc.
 </p>
 
-<h2 id="aggregation">10 · The aggregator <span class="stage-label craft-tag">model</span></h2>
+<h2 id="aggregation">12 · The aggregator <span class="stage-label craft-tag">model</span></h2>
 
 <p>
   The single depth-1 consolidation stage — the only place findings merge. Default model:
@@ -571,7 +709,7 @@ selection:
       and weigh in cross-bot merges.</li>
 </ul>
 
-<h2 id="verdict">11 · Verdict, completeness, rendering <span class="stage-label law-tag">deterministic</span></h2>
+<h2 id="verdict">13 · Verdict, completeness, rendering <span class="stage-label law-tag">deterministic</span></h2>
 
 <p>
   The aggregator's output is <em>evidence, not authority</em> — a deterministic pass decides what
@@ -613,7 +751,7 @@ selection:
   which plan" is always answerable from the output alone.
 </p>
 
-<h2 id="surfaces">12 · CLI &amp; library surfaces</h2>
+<h2 id="surfaces">14 · CLI &amp; library surfaces</h2>
 
 <pre><code>orc-review validate                    # working-tree config check
 orc-review plan [--repo …]             # per-repo cohort, reasons, lanes — instant, no model
@@ -640,7 +778,7 @@ outcome.monitorUrl;              // live monitor</code></pre>
   <code>--json</code> is available throughout the CLI.
 </p>
 
-<h2 id="invariants">13 · Invariants</h2>
+<h2 id="invariants">15 · Invariants</h2>
 
 <div class="invariant"><p><strong>A Reviewer Change is never approved by automation.</strong> Advisory at best; a PR cannot nominate or alter its own reviewers (config trusted only from base trees).</p></div>
 <div class="invariant"><p><strong>Selection is deterministic.</strong> The planner chooses how reviewers run, never whether. Byte-identical cohorts for identical inputs.</p></div>
@@ -651,7 +789,7 @@ outcome.monitorUrl;              // live monitor</code></pre>
 <div class="invariant"><p><strong>Fail closed, degrade honestly.</strong> Malformed results, failed required bots, uncovered repos, unknown readiness → never approve. Partial lane failures degrade coverage and say so.</p></div>
 <div class="invariant"><p><strong>Everything reviews sandboxed pinned state.</strong> SHAs not branch names; dirty state fingerprinted into the attempt identity; reviewer writes are limited to local test/build artifacts and never grant publication authority.</p></div>
 
-<h2 id="boundaries">14 · Integration boundaries</h2>
+<h2 id="boundaries">16 · Integration boundaries</h2>
 <p>
   orc-review produces a complete review result but does not publish it. Integrations may consume
   the rendered body, action hint, inline anchors, provenance, and monitor URL to implement code-hosting
@@ -665,8 +803,169 @@ outcome.monitorUrl;              // live monitor</code></pre>
   responsibilities to reviewer lanes.
 </p>
 
+<h2 id="hermes">17 · Hermes: autonomous orchestration</h2>
+
+<p>
+  <a href="https://github.com/NousResearch/hermes-agent">NousResearch Hermes Agent</a> is a
+  long-lived coordinator around orc-review, not another review engine. A scheduled Hermes skill
+  states the outcome, queue rules, recovery protocol, and hard authority boundaries. Hermes then
+  uses normal tools—GitHub CLI, git worktrees, and the installed <code>orc-review</code> CLI—to
+  realize that policy. Reviewer prompts stay source-owned and unchanged; the coordinator reads the
+  installed definitions and preserves each lane's provider, model, effort, and severity semantics.
+</p>
+
+<div class="diagram wide">
+  <div class="flow">
+    <div class="tier-label">source-faithful reviewer definitions</div>
+    <div class="tier">
+      <div class="node lane a">governor<em>1 lane · Sol / medium</em></div>
+      <div class="node lane b">specialist A<em>8 requested lanes · own model</em></div>
+      <div class="node lane c">specialist B<em>2 verbatim lanes · mixed providers</em></div>
+      <div class="node lane merged">specialist C<em>6 requested lenses · own model</em></div>
+    </div>
+    <div class="down">↓ 17 lane keys remain intact; planner may only pack compatible work</div>
+    <div class="tier">
+      <div class="node craft">verified judgment calls<small>at most the configured call ceiling; every lane key exactly once</small></div>
+    </div>
+    <div class="down">↓ all settled envelopes</div>
+    <div class="tier">
+      <div class="node craft agg">single aggregator<small>dedupe · attribution · omissions · dry-run verdict</small></div>
+    </div>
+    <div class="down">↓ publication policy is applied outside the engine</div>
+    <div class="tier">
+      <div class="node law">GitHub COMMENT review<small>full-fidelity findings; no approve or request-changes event</small></div>
+    </div>
+  </div>
+</div>
+
+<p>
+  The distinction between <em>requested lanes</em> and <em>physical calls</em> is central. The
+  installed council can retain seventeen independently attributable mandates while a required
+  planner packs compatible prompts into a much smaller number of model executions. Packing never
+  rewrites prompts, deletes lane keys, changes a reviewer model, or creates a hidden synthesis
+  tier. If the plan cannot satisfy the configured ceiling and AST contract, the run fails before
+  spending reviewer tokens.
+</p>
+
+<div class="callout">
+  <p><strong>Dry-run judgment and publication authority are separate.</strong></p>
+  <p>
+    The engine may honestly conclude <code>APPROVE</code> or <code>REQUEST_CHANGES</code>. A
+    testing orchestrator can still be restricted to a GitHub <code>COMMENT</code> event. It must
+    preserve the verdict and finding severity in the body rather than weakening the review to fit
+    its narrower credentials.
+  </p>
+</div>
+
+<h3>Coordinator responsibilities</h3>
+<ul>
+  <li><strong>Discovery and queueing:</strong> durably record newly observed pull requests before
+      expensive work; defer drafts; process a bounded batch without starving older entries.</li>
+  <li><strong>Deduplication:</strong> inspect formal reviews for a stable marker and never publish
+      a duplicate result for the same head.</li>
+  <li><strong>Trusted context:</strong> fetch PR metadata, changed files, checks, and bounded overlap
+      evidence once; pass it to every lane through <code>--context-file</code> rather than handing
+      reviewer leaves authenticated GitHub access.</li>
+  <li><strong>Pinned preparation:</strong> fetch the actual target branch, derive its merge base,
+      create a disposable writable worktree, and require the local changed-path set to match the
+      code host before running.</li>
+  <li><strong>Plan continuity:</strong> save <code>plan --program --json</code> and execute those exact
+      verified bytes with <code>run --plan-file</code>. A stale artifact is regenerated, never
+      bypassed.</li>
+  <li><strong>Detached execution:</strong> launch long councils through a durable worker, record its
+      artifacts immediately, poll without exhausting the scheduler tick, and reconcile it later.</li>
+  <li><strong>Publication:</strong> publish the complete rendered body with an explicitly authorized
+      event, then query the code host and treat the observed postcondition as authority.</li>
+</ul>
+
+<h2 id="end-to-end">18 · One pull request, end to end</h2>
+
+<div class="diagram wide">
+  <div class="sequence" role="img" aria-label="Sequence from Hermes cron discovery through Orc execution to a verified GitHub COMMENT review.">
+    <div class="seq-who">Hermes</div>
+    <div class="seq-step publish"><strong>1 · Acquire lease and discover</strong><span>Reconcile prior workers, inspect open PRs, persist the queue, skip drafts and already marked heads.</span></div>
+
+    <div class="seq-who">Hermes + git</div>
+    <div class="seq-step"><strong>2 · Pin and prove the change</strong><span>Fetch the target, derive merge-base, build a disposable worktree, compare local and GitHub changed paths.</span></div>
+
+    <div class="seq-who">Hermes + GitHub</div>
+    <div class="seq-step publish"><strong>3 · Gather bounded context</strong><span>Write one immutable context artifact containing metadata, checks, and relevant overlap evidence.</span></div>
+
+    <div class="seq-who">orc-review</div>
+    <div class="seq-step"><strong>4 · Select and classify</strong><span>Base-tree manifest rules choose the required governor, corroborator, and matching specialists.</span></div>
+
+    <div class="seq-who">planner model</div>
+    <div class="seq-step model"><strong>5 · Author an optimized Orc program</strong><span>Pack compatible reviewer lanes under the call ceiling while preserving every prompt and attribution.</span></div>
+
+    <div class="seq-who">orc-review + Orc</div>
+    <div class="seq-step"><strong>6 · Verify before launch</strong><span>Check the AST contract, program digest, pinned facts, reviewer hashes, model capabilities, and sandbox roots.</span></div>
+
+    <div class="seq-who">Orc + harnesses</div>
+    <div class="seq-step model"><strong>7 · Run reviewer leaves</strong><span>Execute concurrently in the confined worktree; optional network access does not expand filesystem or publication authority.</span></div>
+
+    <div class="seq-who">aggregator</div>
+    <div class="seq-step model"><strong>8 · Consolidate</strong><span>Merge duplicate findings, preserve strongest supported severity and source attribution, report omissions, and return structured evidence.</span></div>
+
+    <div class="seq-who">orc-review</div>
+    <div class="seq-step"><strong>9 · Evaluate and render</strong><span>Apply fail-closed verdict algebra and produce one complete review body with provenance.</span></div>
+
+    <div class="seq-who">Hermes + GitHub</div>
+    <div class="seq-step publish"><strong>10 · Publish and verify</strong><span>Use COMMENT only, require one marker review for the expected head, update state and ledger, then clean the worktree.</span></div>
+  </div>
+</div>
+
+<div class="artifact-line" aria-label="End-to-end artifact lineage">
+  <span class="artifact">PR head + merge-base</span><span class="artifact-arrow">→</span>
+  <span class="artifact">context.json</span><span class="artifact-arrow">→</span>
+  <span class="artifact">verified plan.json</span><span class="artifact-arrow">→</span>
+  <span class="artifact">Orc bundle + journal</span><span class="artifact-arrow">→</span>
+  <span class="artifact">review result.json</span><span class="artifact-arrow">→</span>
+  <span class="artifact">GitHub review URL</span>
+</div>
+
+<h2 id="authority">19 · Authority and isolation</h2>
+
+<p>
+  Network, filesystem mutation, review judgment, and code-host publication are independent
+  capabilities. Enabling one does not imply another.
+</p>
+
+<div class="table-wrap"><table>
+  <tr><th>Actor</th><th>Read pinned code</th><th>Write workspace</th><th>Internet</th><th>GitHub context</th><th>Publish review</th></tr>
+  <tr><td>Reviewer leaf</td><td class="authority-yes">Yes</td><td class="authority-scoped">Build/test artifacts only</td><td class="authority-scoped">Opt-in</td><td>Bounded coordinator artifact</td><td class="authority-no">No</td></tr>
+  <tr><td>Aggregator</td><td>Lane envelopes</td><td class="authority-no">Read-only</td><td class="authority-no">Not required</td><td>Inherited evidence only</td><td class="authority-no">No</td></tr>
+  <tr><td>orc-review</td><td class="authority-yes">Yes</td><td class="authority-scoped">Run artifacts</td><td class="authority-scoped">Caller policy</td><td>Caller-supplied</td><td class="authority-no">No</td></tr>
+  <tr><td>Orc runtime</td><td>Declared roots</td><td class="authority-scoped">Per-leaf policy</td><td class="authority-scoped">Run policy</td><td class="authority-no">No host semantics</td><td class="authority-no">No</td></tr>
+  <tr><td>Hermes coordinator</td><td class="authority-yes">Yes</td><td class="authority-scoped">Disposable worktree + state</td><td class="authority-yes">Yes</td><td class="authority-yes">Authenticated</td><td class="authority-scoped">Configured event only</td></tr>
+</table></div>
+
+<p>
+  The common deployment keeps Orc's disk confinement active while opting reviewer leaves into
+  outbound network access for dependency installation, external tools, and primary documentation.
+  Authenticated code-host calls stay with Hermes. Reviewer leaves may inspect public material but
+  cannot commit, push, merge, approve, request changes, or publish.
+</p>
+
+<h2 id="durability">20 · Durability across all three layers</h2>
+
+<div class="table-wrap"><table>
+  <tr><th>Layer</th><th>Durable authority</th><th>What recovery means</th></tr>
+  <tr><td>Hermes</td><td><code>state.json</code> for queue/deduplication; locked run ledger for observability; detached worker PID/final/exit artifacts</td><td>A later scheduler tick reconciles settled work, rejects stale or closed heads, and resumes publication only after explicit checks.</td></tr>
+  <tr><td>orc-review</td><td>Pinned repo facts, reviewer content hashes, context digest, verified program bytes and SHA-256, structured review result</td><td>A saved plan runs only when the current change, definitions, models, policy, and program still match; otherwise preparation starts again.</td></tr>
+  <tr><td>Orc</td><td>Frozen bundle, write-ahead journal, trace sidecar, content-addressed leaf results, report projection</td><td>Replay delivers recorded completions deterministically; unfinished safe work continues; write leaves re-orient and fail forward.</td></tr>
+</table></div>
+
+<p>
+  These stores answer different questions and do not replace one another. Hermes answers
+  <em>which pull requests are owed a review and whether one was published</em>. orc-review answers
+  <em>which reviewers and exact verified plan judged which pinned change</em>. Orc answers
+  <em>which agent leaves actually ran, in what completion order, with what durable results</em>.
+  Together they provide recoverability without giving the scheduling layer control over judgment
+  or giving judgment agents control over side effects.
+</p>
+
 <p class="footnote">
-  orc-review · architecture and behavior
+  The Orc review system · runtime, review engine, and Hermes automation
 </p>
 </main>
 </body>

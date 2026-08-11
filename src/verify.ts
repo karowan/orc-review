@@ -52,6 +52,9 @@ export function verifyProgram(
 
   const lanes = flatLanes(reviewers);
   const knownKeys = new Set(lanes.map((l) => l.promptKey));
+  const declaredHarness = new Map(
+    lanes.filter((l) => l.harness).map((l) => [l.promptKey, l.harness as string]),
+  );
   const verbatimKeys = new Set(lanes.filter((l) => l.botVerbatim).map((l) => l.promptKey));
 
   let hasDefaultExport = false;
@@ -315,6 +318,35 @@ export function verifyProgram(
             `lane PROMPTS[${JSON.stringify(key)}] belongs to a verbatim bot and cannot be merged with other lanes`,
           );
         }
+      }
+    }
+    // Harness pinning. A lane's declared harness is a pin, not a preference:
+    // "pick the strongest among the merged lanes" once put six codex-declared
+    // lanes onto one claude call, so a single provider's weekly limit took
+    // out entire cross-persona bundles — the blast radius of one provider
+    // must be exactly the lanes that chose it. Lanes declaring no harness are
+    // unconstrained and may ride in any bundle.
+    const pins = new Map<string, string[]>();
+    for (const key of call.keys) {
+      const pin = declaredHarness.get(key);
+      if (pin) {
+        if (!pins.has(pin)) pins.set(pin, []);
+        (pins.get(pin) as string[]).push(key);
+      }
+    }
+    if (pins.size > 1) {
+      const shape = [...pins.entries()]
+        .map(([h, keys]) => `${h} (${keys.map((k) => JSON.stringify(k)).join(", ")})`)
+        .join(" vs ");
+      problems.push(
+        `${call.where} merges lanes with different declared harnesses: ${shape} — a declared harness is a pin, and cross-harness bundles put one provider's outage onto every merged lane`,
+      );
+    } else if (pins.size === 1 && call.model) {
+      const [pinned] = pins.keys();
+      if (call.model.harness !== pinned) {
+        problems.push(
+          `${call.where} runs on harness ${JSON.stringify(call.model.harness)} but its lane(s) ${(pins.get(pinned) as string[]).map((k) => JSON.stringify(k)).join(", ")} declare ${JSON.stringify(pinned)} — a declared harness is a pin, not a preference`,
+        );
       }
     }
   }
