@@ -10,6 +10,7 @@ import { loadConfig, ConfigError } from "./config.js";
 import { worktreeTree } from "./git.js";
 import { prepare, review, type ReviewOptions } from "./runner.js";
 import { defaultRegistryDir, listRegistry } from "./registry.js";
+import { verifyProgramBody, type PlanVerifyInput } from "./selfverify.js";
 
 const program = new Command("orc-review")
   .description("model-planned code review workflows on the orc runtime")
@@ -84,6 +85,35 @@ program
     const names = listRegistry(local.registry);
     if (names.length === 0) console.log(`(registry is empty — add ${defaultRegistryDir()}/<name>.md)`);
     for (const name of names) console.log(name);
+  });
+
+program
+  .command("verify-program")
+  .description("verify a candidate plan program body against a serialized plan contract")
+  .requiredOption("--input <path>", "plan-input.json written beside the planner leaf")
+  .argument("<program>", "file containing the candidate program body")
+  .action((programFile: string, local: { input: string }) => {
+    let input: PlanVerifyInput;
+    let body: string;
+    try {
+      input = JSON.parse(readFileSync(local.input, "utf8")) as PlanVerifyInput;
+      body = readFileSync(programFile, "utf8");
+    } catch (err) {
+      fail(String(err));
+      return;
+    }
+    let problems: string[];
+    try {
+      problems = verifyProgramBody(input, body);
+    } catch (err) {
+      problems = [String(err instanceof Error ? err.message : err)];
+    }
+    if (problems.length === 0) {
+      console.log("OK");
+      return;
+    }
+    for (const problem of problems) console.error(`- ${problem}`);
+    process.exit(1);
   });
 
 program

@@ -38,6 +38,7 @@ import { render, type RenderedReview } from "./render.js";
 import { loadLocalReviewers } from "./registry.js";
 import { select } from "./selection.js";
 import { parseRepoArg, resolvePins, type RepoArg } from "./sources.js";
+import type { PlanVerifyInput } from "./selfverify.js";
 import { templateProgram } from "./template.js";
 import { evaluate, parseProgramResult, type Evaluation, type ParsedProgramResult } from "./verdict.js";
 import { verifyProgram } from "./verify.js";
@@ -439,10 +440,20 @@ export async function prepare(opts: ReviewOptions): Promise<PreparedReview> {
       reasoningEffort,
       defaultHarness: primaryManifest?.run.defaultHarness,
       onLog: progress,
+      // The planner's workbench: the deterministic verifier as a tool plus
+      // a verifier-valid 1:1 skeleton to condense from. The model iterates
+      // program.ts to green in-session instead of gambling one shot.
+      selfVerify: {
+        input: { assembly, maxJudgmentCalls, modelPolicy } satisfies PlanVerifyInput,
+        skeleton: templateProgram(eligible),
+      },
     });
   };
   const planModel =
     opts.planner === null || plannerConfig?.disabled ? null : (opts.planner ?? configuredPlanner());
+  // Only the configured planner has the workbench files; a caller-supplied
+  // PlanModel gets the plain one-shot prompt.
+  const plannerSelfVerifies = planModel !== null && opts.planner === undefined;
 
   if (planModel) {
     let feedback: string[] | undefined;
@@ -459,6 +470,7 @@ export async function prepare(opts: ReviewOptions): Promise<PreparedReview> {
             priorBody,
             maxCalls: maxJudgmentCalls,
             modelPolicy,
+            selfVerify: plannerSelfVerifies,
           }),
         );
         const body = extractProgramBody(raw);

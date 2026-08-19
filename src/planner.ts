@@ -51,9 +51,16 @@ export const PROGRAM_SCHEMA: Json = {
 };
 
 /** Total wall clock for one planner attempt (mirrors a generous lane budget). */
-const PLANNER_TIMEOUT_MS = 600_000;
+const PLANNER_TIMEOUT_MS = 900_000;
 /** Idle cutoff between planner output events. */
 const PLANNER_IDLE_MS = 300_000;
+
+export interface PlannerSelfVerify {
+  /** Serialized contract for `orc-review verify-program` (JSON-safe). */
+  input: unknown;
+  /** A verifier-valid 1:1 starting program (the deterministic template). */
+  skeleton: string;
+}
 
 export interface HarnessPlannerOptions {
   /** Directory whose orc configuration resolves the harness registry (the run's cwd). */
@@ -66,6 +73,14 @@ export interface HarnessPlannerOptions {
   /** Manifest default harness, forwarded to registry discovery. */
   defaultHarness?: string;
   onLog?: (message: string) => void;
+  /**
+   * Materializes the verifier as a tool in the leaf's scratch cwd
+   * (plan-input.json + skeleton.ts) and lets the model iterate program.ts
+   * to green before returning. The scratch program.ts, when present, is
+   * preferred over the returned payload — it is the artifact the model
+   * actually verified.
+   */
+  selfVerify?: PlannerSelfVerify;
   /** Test seam: replaces buildRegistry. */
   resolveRegistry?: () => Promise<Registry>;
 }
@@ -90,6 +105,10 @@ export function harnessPlanner(opts: HarnessPlannerOptions): PlanModel {
     // A private scratch cwd: harnesses may treat the leaf cwd as owned
     // scratch space, and the planner must never point one at a shared dir.
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "orc-review-plan-"));
+    if (opts.selfVerify) {
+      fs.writeFileSync(path.join(scratch, "plan-input.json"), JSON.stringify(opts.selfVerify.input));
+      fs.writeFileSync(path.join(scratch, "skeleton.ts"), opts.selfVerify.skeleton);
+    }
     const request: LeafRequest = {
       runId: `plan-${process.pid.toString(36)}-${process.hrtime.bigint().toString(36)}`,
       seq: 0,
@@ -100,7 +119,8 @@ export function harnessPlanner(opts: HarnessPlannerOptions): PlanModel {
       schema: PROGRAM_SCHEMA,
       model: opts.model,
       reasoningEffort: opts.reasoningEffort,
-      readOnly: true,
+      // Self-verifying planners write and re-verify program.ts in scratch.
+      readOnly: !opts.selfVerify,
       cwd: scratch,
       approvalMode: "auto",
       idleTimeoutMs: PLANNER_IDLE_MS,
@@ -122,6 +142,16 @@ export function harnessPlanner(opts: HarnessPlannerOptions): PlanModel {
         else if (event.kind === "error") failure = event.message;
       }
       if (failure !== undefined) throw new Error(`planner model failed: ${failure}`);
+      if (opts.selfVerify) {
+        // Prefer the file the model iterated against the verifier: the
+        // returned payload can drift from the artifact it validated.
+        try {
+          const iterated = fs.readFileSync(path.join(scratch, "program.ts"), "utf8");
+          if (iterated.trim()) return iterated;
+        } catch {
+          /* no file — fall through to the returned payload */
+        }
+      }
       const program =
         result && typeof result === "object" && !Array.isArray(result)
           ? (result as { program?: unknown }).program
@@ -182,8 +212,10 @@ export function plannerPrompt(args: {
   priorBody?: string;
   maxCalls?: number;
   modelPolicy?: ModelPolicy;
+  /** The planner leaf has the verifier as a tool in its cwd — instruct the loop. */
+  selfVerify?: boolean;
 }): string {
-  const { reviewers, facts, matchedRules, feedback, priorBody, maxCalls, modelPolicy } = args;
+  const { reviewers, facts, matchedRules, feedback, priorBody, maxCalls, modelPolicy, selfVerify } = args;
   const reviewerBlocks = reviewers
     .map((r) => {
       const lanes = r.lanes
@@ -228,6 +260,14 @@ ${facts.changedPaths.slice(0, 200).join("\n")}${facts.changedPaths.length > 200 
 THE LANES (every key below runs exactly once):
 ${reviewerBlocks}
 
-${feedback?.length ? `YOUR PRIOR ATTEMPT WAS REJECTED. Problems:\n${feedback.map((p) => `- ${p}`).join("\n")}\n\nPrior attempt:\n\`\`\`ts\n${priorBody}\n\`\`\`\n\nFix every problem and output the corrected program.\n` : ""}Return the result as {"program": "<the program body>"} matching the response schema. The program body must start exactly with:
+${selfVerify ? `SELF-VALIDATE BEFORE RETURNING — your working directory is a workbench:
+- skeleton.ts is a VERIFIER-VALID starting program that runs every lane 1:1 with no merges. It always passes; it is also the most expensive possible plan.
+- Write your candidate to program.ts and run: orc-review verify-program --input plan-input.json program.ts
+  It prints OK, or the exact deterministic problems the engine would reject you with.
+- Iterate: merge harder, verify, fix, verify again. Do not return until it prints OK.
+- CONDENSE: a good plan lands well under the ceiling. Start from the skeleton and pack compatible lanes; the verifier loop means bold merging costs you nothing.
+- Return the final program.ts content as {"program": ...} exactly as verified.
+
+` : ""}${feedback?.length ? `YOUR PRIOR ATTEMPT WAS REJECTED. Problems:\n${feedback.map((p) => `- ${p}`).join("\n")}\n\nPrior attempt:\n\`\`\`ts\n${priorBody}\n\`\`\`\n\nFix every problem and output the corrected program.\n` : ""}Return the result as {"program": "<the program body>"} matching the response schema. The program body must start exactly with:
 export default async ({ agent, parallel, phase, settle, log }) => {`;
 }
