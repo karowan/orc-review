@@ -101,7 +101,7 @@ const ManifestSchema = z
       .default({}),
     planner: z
       .object({
-        harness: z.enum(["claude", "codex"]).optional(),
+        harness: z.string().min(1).optional(),
         model: z.string().optional(),
         effort: z.string().optional(),
         max_calls: z.number().int().min(1).max(64).optional(),
@@ -387,6 +387,16 @@ export function loadConfig(tree: Tree): ReviewConfig {
 
   if (manifest.planner.disabled && manifest.planner.required) {
     problems.push("planner cannot be both disabled and required");
+  }
+  if (
+    manifest.planner.harness &&
+    manifest.planner.harness !== "claude" &&
+    manifest.planner.harness !== "codex" &&
+    !manifest.planner.model
+  ) {
+    problems.push(
+      `planner.harness "${manifest.planner.harness}" has no built-in default model; set planner.model explicitly`,
+    );
   }
   if (manifest.planner.maxCalls !== undefined && !manifest.planner.required) {
     problems.push("planner.max_calls requires planner.required: true so fallback cannot exceed the cap");

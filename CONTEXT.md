@@ -41,7 +41,9 @@ fail-closed verdicts) predate this repo; the execution paradigm is orc's.
    policy-only entries are dropped from the menu, and every rewrite is recorded
    in `PreparedReview.modelResolution`. A plan artifact is therefore bound to
    the host catalog it was resolved against.
-4. **Plan (model craft).** A planner model receives the compiled reviewer specs,
+4. **Plan (model craft).** A planner model — run as one read-only structured
+   leaf through the same harness registry the lanes use, on whatever serving
+   path this host registers — receives the compiled reviewer specs,
    selection rules, and diff facts, and authors the literal `review.orc.ts` —
    one program, one run, one promise graph, **flat** (rev 2): the union of every
    eligible bot's lanes runs as one concurrent layer with no per-reviewer

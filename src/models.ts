@@ -201,11 +201,19 @@ export function resolveReviewModels(input: {
   }
 
   if (manifest && !manifest.planner.disabled) {
-    const plannerHarness = manifest.planner.harness === "codex" ? "codex" : "claude";
+    const plannerHarness = manifest.planner.harness ?? "claude";
     const explicit = manifest.planner.model;
-    const declared = explicit ?? (plannerHarness === "codex" ? DEFAULT_CODEX_PLANNER_MODEL : DEFAULT_PLANNER_MODEL);
+    const declared =
+      explicit ??
+      (plannerHarness === "codex"
+        ? DEFAULT_CODEX_PLANNER_MODEL
+        : plannerHarness === "claude"
+          ? DEFAULT_PLANNER_MODEL
+          : undefined);
     try {
-      const resolved = resolve(plannerHarness, declared, "planner");
+      // A custom harness with no model is rejected by config validation; the
+      // undefined guard here just keeps resolution total.
+      const resolved = declared === undefined ? undefined : resolve(plannerHarness, declared, "planner");
       // Materialize only when resolution changed something: an untouched
       // default stays implicit, exactly as authored.
       if (resolved !== undefined && resolved !== declared) manifest.planner.model = resolved;

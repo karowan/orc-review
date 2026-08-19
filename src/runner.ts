@@ -25,9 +25,8 @@ import {
 } from "./contracts.js";
 import { classify } from "./eligibility.js";
 import {
-  claudeCliPlanner,
-  codexCliPlanner,
   extractProgramBody,
+  harnessPlanner,
   plannerPrompt,
   DEFAULT_CODEX_PLANNER_EFFORT,
   DEFAULT_CODEX_PLANNER_MODEL,
@@ -423,14 +422,24 @@ export async function prepare(opts: ReviewOptions): Promise<PreparedReview> {
   let plannerUsed: "model" | "template" = "template";
 
   const plannerConfig = primaryManifest?.planner;
+  // The planner rides the harness registry — the same seam and serving path
+  // as every lane, on every host (workstation CLIs or an embedder's
+  // exec-harness). Model resolution already ran, so plannerConfig.model
+  // carries the host id when a catalog was available.
   const configuredPlanner = () => {
-    if (plannerConfig?.harness === "codex") {
-      return codexCliPlanner(
-        plannerConfig.model ?? DEFAULT_CODEX_PLANNER_MODEL,
-        plannerConfig.effort ?? DEFAULT_CODEX_PLANNER_EFFORT,
-      );
-    }
-    return claudeCliPlanner(plannerConfig?.model ?? DEFAULT_PLANNER_MODEL);
+    const harness = plannerConfig?.harness ?? "claude";
+    const model =
+      plannerConfig?.model ??
+      (harness === "codex" ? DEFAULT_CODEX_PLANNER_MODEL : harness === "claude" ? DEFAULT_PLANNER_MODEL : undefined);
+    const reasoningEffort = plannerConfig?.effort ?? (harness === "codex" ? DEFAULT_CODEX_PLANNER_EFFORT : undefined);
+    return harnessPlanner({
+      cwd,
+      harness,
+      model,
+      reasoningEffort,
+      defaultHarness: primaryManifest?.run.defaultHarness,
+      onLog: progress,
+    });
   };
   const planModel =
     opts.planner === null || plannerConfig?.disabled ? null : (opts.planner ?? configuredPlanner());

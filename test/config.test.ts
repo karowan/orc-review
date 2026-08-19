@@ -146,6 +146,14 @@ model_policy:
     expect(problemsOf(files).join()).toContain("planner.max_calls requires planner.required: true");
   });
 
+  it("requires an explicit model for a planner harness with no built-in default", () => {
+    const files = fixtureFiles();
+    files[".orc-review/manifest.yaml"] += "\nplanner:\n  harness: my-exec\n";
+    expect(problemsOf(files).join()).toContain('planner.harness "my-exec" has no built-in default model');
+    files[".orc-review/manifest.yaml"] += "  model: some-model\n";
+    expect(problemsOf(files)).toEqual([]);
+  });
+
   it("rejects duplicate reviewer ids", () => {
     const files = fixtureFiles();
     files[".orc-review/manifest.yaml"] = files[".orc-review/manifest.yaml"].replace(

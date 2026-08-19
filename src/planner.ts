@@ -5,9 +5,23 @@
  * with union attribution. There is no support tier — every call is a judgment
  * lane or the aggregator. The verifier decides whether its program runs; the
  * template generator is the fallback.
+ *
+ * The planner runs THROUGH THE HARNESS REGISTRY — the same seam every lane
+ * uses. On a workstation that resolves to the bundled claude/codex harnesses
+ * (the same CLIs and auth the lanes use); on an embedding host it resolves to
+ * whatever exec-harness the host registered, so the planner automatically
+ * follows the lanes onto the host's serving path. There is no separate
+ * "planner transport": a host that can run one lane can plan.
+ *
+ * The program travels as STRUCTURED OUTPUT ({"program": "..."} against a
+ * JSON Schema), not as fenced free text — the same enforcement that makes
+ * lane output reliable across serving backends.
  */
-import { execFile } from "node:child_process";
+import * as fs from "node:fs";
 import os from "node:os";
+import * as path from "node:path";
+import type { HarnessContext, Json, LeafRequest, Registry } from "@karowanorg/orc-core";
+import { buildRegistry } from "@karowanorg/orc-ops";
 import {
   DEFAULT_CODEX_PLANNER_EFFORT,
   DEFAULT_CODEX_PLANNER_MODEL,
@@ -19,67 +33,143 @@ import {
 
 export { DEFAULT_CODEX_PLANNER_EFFORT, DEFAULT_CODEX_PLANNER_MODEL, DEFAULT_PLANNER_MODEL };
 
-/** Pluggable plan model: planner prompt in, program body (or fenced text) out. */
+/** Pluggable plan model: planner prompt in, program body (or wrapped text) out. */
 export type PlanModel = (prompt: string) => Promise<string>;
 
-/** Runs the planner through the local `claude` CLI (user's own auth). */
-export function claudeCliPlanner(model: string = DEFAULT_PLANNER_MODEL): PlanModel {
-  return (prompt) =>
-    new Promise((resolve, reject) => {
-      const child = execFile(
-        "claude",
-        ["-p", "--model", model, "--output-format", "text"],
-        { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 300_000 },
-        (err, stdout, stderr) => {
-          if (err) reject(new Error(`planner model failed: ${err.message}\n${stderr.slice(0, 2000)}`));
-          else resolve(stdout);
-        },
-      );
-      child.stdin?.write(prompt);
-      child.stdin?.end();
-    });
+/** Structured-output contract for the planner leaf. */
+export const PROGRAM_SCHEMA: Json = {
+  type: "object",
+  properties: {
+    program: {
+      type: "string",
+      description:
+        "The complete orc program body, starting exactly with: export default async ({ agent, parallel, phase, settle, log }) => {",
+    },
+  },
+  required: ["program"],
+  additionalProperties: false,
+};
+
+/** Total wall clock for one planner attempt (mirrors a generous lane budget). */
+const PLANNER_TIMEOUT_MS = 600_000;
+/** Idle cutoff between planner output events. */
+const PLANNER_IDLE_MS = 300_000;
+
+export interface HarnessPlannerOptions {
+  /** Directory whose orc configuration resolves the harness registry (the run's cwd). */
+  cwd: string;
+  /** Registered harness name; omitted → the registry's default harness. */
+  harness?: string;
+  /** Host-resolved model id (resolution happens before planning). */
+  model?: string;
+  reasoningEffort?: string;
+  /** Manifest default harness, forwarded to registry discovery. */
+  defaultHarness?: string;
+  onLog?: (message: string) => void;
+  /** Test seam: replaces buildRegistry. */
+  resolveRegistry?: () => Promise<Registry>;
 }
 
-/** Runs the planner through the local `codex` CLI (locally configured provider and auth). */
-export function codexCliPlanner(
-  model: string = DEFAULT_CODEX_PLANNER_MODEL,
-  effort: string = DEFAULT_CODEX_PLANNER_EFFORT,
-): PlanModel {
-  return (prompt) =>
-    new Promise((resolve, reject) => {
-      const child = execFile(
-        "codex",
-        [
-          "exec",
-          "--model",
-          model,
-          "--sandbox",
-          "read-only",
-          "--ephemeral",
-          "--ignore-rules",
-          "--skip-git-repo-check",
-          "-c",
-          `approval_policy="never"`,
-          "-c",
-          `model_reasoning_effort=${JSON.stringify(effort)}`,
-          "-",
-        ],
-        { cwd: os.tmpdir(), encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 300_000 },
-        (err, stdout, stderr) => {
-          if (err) reject(new Error(`planner model failed: ${err.message}\n${stderr.slice(0, 2000)}`));
-          else resolve(stdout);
-        },
+/**
+ * Runs the planner as one read-only leaf through the host's harness registry —
+ * the exact path lanes take, whatever that path is on this host.
+ */
+export function harnessPlanner(opts: HarnessPlannerOptions): PlanModel {
+  return async (prompt) => {
+    const registry = await (opts.resolveRegistry?.() ??
+      buildRegistry({ cwd: opts.cwd, defaultHarness: opts.defaultHarness }));
+    const name = opts.harness ?? registry.defaultHarness;
+    const harness = registry.harnesses.get(name);
+    if (!harness) {
+      throw new Error(
+        `planner harness "${name}" is not registered (available: ${[...registry.harnesses.keys()].join(", ") || "none"})`,
       );
-      child.stdin?.write(prompt);
-      child.stdin?.end();
-    });
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PLANNER_TIMEOUT_MS);
+    // A private scratch cwd: harnesses may treat the leaf cwd as owned
+    // scratch space, and the planner must never point one at a shared dir.
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "orc-review-plan-"));
+    const request: LeafRequest = {
+      runId: `plan-${process.pid.toString(36)}-${process.hrtime.bigint().toString(36)}`,
+      seq: 0,
+      id: "planner",
+      prompt,
+      system: "",
+      brief: "",
+      schema: PROGRAM_SCHEMA,
+      model: opts.model,
+      reasoningEffort: opts.reasoningEffort,
+      readOnly: true,
+      cwd: scratch,
+      approvalMode: "auto",
+      idleTimeoutMs: PLANNER_IDLE_MS,
+    };
+    const context: HarnessContext = {
+      executor: registry.executor,
+      // The planner is prompt-in/program-out; it has no business escalating.
+      requestApproval: async () => ({ behavior: "deny", message: "the planner leaf takes no approvals" }),
+      signal: controller.signal,
+      log: opts.onLog ?? (() => {}),
+    };
+    try {
+      let result: Json | undefined;
+      let text = "";
+      let failure: string | undefined;
+      for await (const event of harness.invoke(request, context)) {
+        if (event.kind === "text") text += event.delta;
+        else if (event.kind === "result") result = event.output;
+        else if (event.kind === "error") failure = event.message;
+      }
+      if (failure !== undefined) throw new Error(`planner model failed: ${failure}`);
+      const program =
+        result && typeof result === "object" && !Array.isArray(result)
+          ? (result as { program?: unknown }).program
+          : undefined;
+      if (typeof program === "string" && program.trim()) return program;
+      if (typeof result === "string" && result.trim()) return result;
+      if (text.trim()) return text;
+      throw new Error("planner model returned no program");
+    } finally {
+      clearTimeout(timer);
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
+  };
 }
 
-/** Extracts the last fenced code block, or returns the text as-is. */
+/**
+ * Extracts the program body from a planner response: a structured
+ * {"program": "..."} JSON payload, a fenced code block, or the raw text.
+ */
 export function extractProgramBody(text: string): string {
-  const fences = [...text.matchAll(/```(?:ts|typescript|js|javascript)?\n([\s\S]*?)```/g)];
-  if (fences.length > 0) return fences[fences.length - 1][1].trim();
-  return text.trim();
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as { program?: unknown };
+      if (parsed && typeof parsed.program === "string" && parsed.program.trim()) {
+        return parsed.program.trim();
+      }
+    } catch {
+      /* not JSON — fall through to fences */
+    }
+  }
+  const fences = [...trimmed.matchAll(/```(?:ts|typescript|js|javascript|json)?\n([\s\S]*?)```/g)];
+  if (fences.length > 0) {
+    const body = fences[fences.length - 1][1].trim();
+    // A fenced JSON wrapper still carries the program field.
+    if (body.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(body) as { program?: unknown };
+        if (parsed && typeof parsed.program === "string" && parsed.program.trim()) {
+          return parsed.program.trim();
+        }
+      } catch {
+        /* fenced code, not JSON */
+      }
+    }
+    return body;
+  }
+  return trimmed;
 }
 
 const excerpt = (s: string, n = 1500) => (s.length <= n ? s : `${s.slice(0, n)}\n…[truncated]`);
@@ -138,6 +228,6 @@ ${facts.changedPaths.slice(0, 200).join("\n")}${facts.changedPaths.length > 200 
 THE LANES (every key below runs exactly once):
 ${reviewerBlocks}
 
-${feedback?.length ? `YOUR PRIOR ATTEMPT WAS REJECTED. Problems:\n${feedback.map((p) => `- ${p}`).join("\n")}\n\nPrior attempt:\n\`\`\`ts\n${priorBody}\n\`\`\`\n\nFix every problem and output the corrected program.\n` : ""}Output ONLY a single fenced \`\`\`ts code block with the program body, starting exactly with:
+${feedback?.length ? `YOUR PRIOR ATTEMPT WAS REJECTED. Problems:\n${feedback.map((p) => `- ${p}`).join("\n")}\n\nPrior attempt:\n\`\`\`ts\n${priorBody}\n\`\`\`\n\nFix every problem and output the corrected program.\n` : ""}Return the result as {"program": "<the program body>"} matching the response schema. The program body must start exactly with:
 export default async ({ agent, parallel, phase, settle, log }) => {`;
 }

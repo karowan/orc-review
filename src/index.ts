@@ -5,7 +5,7 @@ export { select, matchChangedPath, matchSegment } from "./selection.js";
 export { classify } from "./eligibility.js";
 export { assemble, promptTable, MERGE_PROMPT } from "./assemble.js";
 export { templateProgram } from "./template.js";
-export { plannerPrompt, claudeCliPlanner, extractProgramBody, DEFAULT_PLANNER_MODEL, type PlanModel } from "./planner.js";
+export { plannerPrompt, harnessPlanner, extractProgramBody, DEFAULT_PLANNER_MODEL, type PlanModel } from "./planner.js";
 export { verifyProgram } from "./verify.js";
 export {
   fetchHostCatalog,

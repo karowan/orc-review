@@ -65,9 +65,16 @@ verify (deterministic) → one orc run → verdict + render (deterministic)
   `.orc-review/` is a Reviewer Change: altered reviewers are excluded and the
   verdict is capped at ADVISORY. Automation never approves changes to review
   authority.
-- **Plan** — a planner model (default `claude-fable-5` via the `claude` CLI;
-  `planner.harness: codex` uses the locally configured Codex provider and auth)
-  authors the literal orc program as a **flat lane layer**: the union of every
+- **Plan** — a planner model authors the literal orc program **through the
+  harness registry — the same seam every lane uses**. `planner.harness` names
+  any registered harness (default `claude`, model `claude-fable-5`; `codex`
+  carries its own defaults; a custom exec-harness name requires an explicit
+  `planner.model`). On a workstation that resolves to the bundled CLI
+  harnesses with their local auth; an embedding host's registered
+  exec-harness serves the planner exactly as it serves lanes, so any host
+  that can run one lane can plan. The program travels as structured output
+  ({"program": …}), the same schema enforcement lanes rely on. The program is
+  a **flat lane layer**: the union of every
   eligible bot's lanes, concurrent, depth 1. Its craft is **packing compatible
   lanes within or across bots** into fewer executions (verbatim texts
   concatenated, findings attributed to every included lane, strongest declared

@@ -47,7 +47,8 @@ export interface Manifest {
     aggregatorEffort?: string;
   };
   planner: {
-    harness?: "claude" | "codex";
+    /** Any registered harness name; "claude"/"codex" carry built-in model defaults. */
+    harness?: string;
     model?: string;
     effort?: string;
     maxCalls?: number;
