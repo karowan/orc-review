@@ -211,7 +211,8 @@ describe("render (rev 2)", () => {
       runDetails: [],
     });
     expect(out.body).toContain("orc-review · CHANGES REQUESTED");
-    expect(out.body).toContain("MUST FIX (1) · SHOULD FIX (0)");
+    expect(out.body).toContain("### Blocking (1)");
+    expect(out.body).toContain("- **MUST FIX** Broken contract");
     expect(out.body).not.toContain("Severity capped");
   });
 
@@ -234,7 +235,9 @@ describe("render (rev 2)", () => {
       runDetails: [["run", "r_x_123"]],
     });
     expect(out.body).toContain("orc-review · CHANGES REQUESTED · abc1234");
-    expect(out.body).toContain("MUST FIX (1) · SHOULD FIX (0) · CONSIDER (0) · NIT (1)");
+    expect(out.body).toContain("### Blocking (1)");
+    expect(out.body).toContain("### Non-blocking (1)");
+    expect(out.body).toContain("Details and fixes (2)");
     expect(out.inlineComments).toHaveLength(1);
     expect(out.body).toContain("run: `r_x_123`");
   });
@@ -267,7 +270,7 @@ describe("render (rev 2)", () => {
       changedPaths: [],
       runDetails: [],
     });
-    expect(out.body).toContain("Partial lane coverage: abhinav/lanes/1 failed");
+    expect(out.body).toContain("Partial lane coverage: abhinav failed");
     expect(out.body).toContain("No findings survived scrutiny.");
   });
 });
