@@ -32,7 +32,7 @@ const INPUT = {
   consolidated: {
     summary: "The change is not ready until all competing description writers are coordinated.",
     findings: [], coverage: ["Intake inspection", "Locking and recovery"], omissions: [],
-    readiness: "not_ready",
+    readiness: "not_ready" as const,
   },
   reviewerNames: ["Karowan (frank)", "Dev Patel (frank)"],
   reviewerChange: false,
