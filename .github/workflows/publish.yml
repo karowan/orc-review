@@ -1,0 +1,56 @@
+# Publishes orc-review when package.json's version is not yet on npm.
+# Bump the version in a PR; merging to main publishes it (tests gate it).
+# Safe to re-run: an already-published version is skipped.
+#
+# Auth is npm trusted publishing (OIDC): no token or secret. The package on
+# npmjs.com lists this repo + workflow file as its trusted publisher; see
+# PUBLISHING.md for the one-time setup.
+name: publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One publish at a time; a later push waits instead of racing the registry.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for trusted publishing + provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Trusted publishing needs npm >= 11.5.1; Node 22 ships npm 10.
+      - run: npm install -g npm@11
+
+      - run: npm ci
+
+      - name: Is this version on the registry yet?
+        id: plan
+        run: node scripts/publish-if-new.mjs --plan
+
+      - name: Build and test
+        if: steps.plan.outputs.count != '0'
+        run: npm run build && npm test
+
+      - name: Publish preflight
+        if: steps.plan.outputs.count != '0'
+        run: |
+          echo "node $(node --version), npm $(npm --version) (trusted publishing needs >= 11.5.1)"
+          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then echo "OIDC token request URL: present"; else echo "OIDC token request URL: MISSING (id-token: write not granted)"; fi
+
+      - name: Publish
+        if: steps.plan.outputs.count != '0'
+        run: npm run release
