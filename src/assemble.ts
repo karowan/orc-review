@@ -49,6 +49,16 @@ const PRIOR_ROUNDS_MAX = 3;
 const PRIOR_FINDINGS_MAX = 8;
 const PRIOR_RESPONSES_MAX = 3;
 const PRIOR_RESPONSE_CHARS = 1200;
+// Per-string caps too, so the ceiling is OURS: the producer already clips
+// titles, but a bound that depends on an upstream clip is not a bound. With
+// these, the section cannot exceed ~10KB however long the thread runs.
+const PRIOR_LINE_CHARS = 200;
+
+/** Clip to `max`, marking the cut so a severed sentence is never read as a
+ *  complete position. */
+function clip(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max)}…[truncated]`;
+}
 
 /**
  * Prior rounds and author answers, read from the coordinator context file.
@@ -79,11 +89,14 @@ export function priorContextFrom(context: string | undefined): PriorContext | un
     if (entry.kind === "council_review" && typeof entry.verdict === "string") {
       if (rounds.length >= PRIOR_ROUNDS_MAX) continue;
       const findings = Array.isArray(entry.findings)
-        ? entry.findings.filter((f): f is string => typeof f === "string").slice(0, PRIOR_FINDINGS_MAX)
+        ? entry.findings
+            .filter((f): f is string => typeof f === "string")
+            .slice(0, PRIOR_FINDINGS_MAX)
+            .map((f) => clip(f, PRIOR_LINE_CHARS))
         : [];
       rounds.push({
         ...(typeof entry.at === "string" ? { at: entry.at } : {}),
-        verdict: entry.verdict,
+        verdict: clip(entry.verdict, PRIOR_LINE_CHARS),
         findings,
       });
     } else if (entry.kind === "comment" && typeof entry.body === "string" && entry.body.trim()) {
@@ -91,7 +104,7 @@ export function priorContextFrom(context: string | undefined): PriorContext | un
       responses.push({
         ...(typeof entry.at === "string" ? { at: entry.at } : {}),
         author: typeof entry.author === "string" ? entry.author : "unknown",
-        text: entry.body.slice(0, PRIOR_RESPONSE_CHARS),
+        text: clip(entry.body, PRIOR_RESPONSE_CHARS),
       });
     }
   }

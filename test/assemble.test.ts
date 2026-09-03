@@ -77,7 +77,26 @@ describe("priorContextFrom", () => {
     expect(prior.rounds).toHaveLength(3);
     expect(prior.rounds[0].findings).toHaveLength(8);
     expect(prior.responses).toHaveLength(3);
-    expect(prior.responses[0].text.length).toBe(1200);
+    expect(prior.responses[0].text).toContain("…[truncated]");
+  });
+
+  it("holds a hard ceiling however long the thread runs", () => {
+    // The bound must be OURS, not inherited from whatever clipped the
+    // context upstream: a two-megabyte thread must not reach the model.
+    const monster = JSON.stringify({ discussion: { entries: [
+      ...Array.from({ length: 40 }, () => ({
+        kind: "council_review", at: "2026-09-02T00:00:00Z",
+        verdict: "orc-review · CHANGES REQUESTED · " + "v".repeat(4000),
+        findings: Array.from({ length: 50 }, () => `MUST FIX ${"t".repeat(4000)}`),
+      })),
+      ...Array.from({ length: 40 }, () => ({
+        kind: "comment", author: "a".repeat(500), at: "2026-09-02T00:00:00Z",
+        body: "x".repeat(50_000),
+      })),
+    ] } });
+    expect(monster.length).toBeGreaterThan(2_000_000);
+    const section = priorRoundsSection(priorContextFrom(monster));
+    expect(section.length).toBeLessThan(12_000);
   });
 });
 
