@@ -9,7 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { Orc } from "@karowanorg/orc-sdk";
-import { assemble, type AssemblyInput } from "./assemble.js";
+import { assemble, priorContextFrom, type AssemblyInput } from "./assemble.js";
 import { ConfigError, loadConfig } from "./config.js";
 import {
   DEFAULT_AGGREGATOR,
@@ -401,6 +401,10 @@ export async function prepare(opts: ReviewOptions): Promise<PreparedReview> {
     headSha: changeId,
     matchedRules,
     aggregator,
+    // Derived from the SAME --context-file `plan` and `run` both receive, so
+    // the assembled program stays byte-identical across the two and the plan
+    // contract holds.
+    priorContext: priorContextFrom(opts.context),
   };
   const maxJudgmentCalls = primaryManifest?.planner?.maxCalls;
   const modelPolicy = primaryManifest?.modelPolicy;
